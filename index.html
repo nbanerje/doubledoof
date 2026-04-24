@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bat Duel</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="game-wrap">
+        <button id="settingsToggleBtn" class="settings-toggle" type="button" aria-label="Open settings" title="Settings">⚙</button>
+        <canvas id="gameCanvas" width="1040" height="620"></canvas>
+        <div id="roundBanner" class="round-banner hidden"></div>
+        <div id="arcadeOverlay" class="arcade-overlay">
+          <div class="arcade-card">
+            <p id="arcadeStepLabel" class="arcade-step">Step 1 of 4</p>
+            <h2 id="arcadeTitle">Welcome to Bat Duel</h2>
+            <p id="arcadeText">Arcade flow: pick mode, sign in if online, then start the match.</p>
+            <div id="arcadeActions" class="arcade-actions"></div>
+          </div>
+        </div>
+      </section>
+      <div id="settingsBackdrop" class="settings-backdrop hidden"></div>
+      <aside id="settingsDrawer" class="panel settings-drawer">
+        <div class="settings-header">
+          <h2>Settings</h2>
+          <button id="settingsCloseBtn" type="button">Close</button>
+        </div>
+        <p class="subtitle">Fast rounds, local/online battles, and profiles backed by Neon.</p>
+        <div class="profile">
+          <label>
+            Username
+            <input id="usernameInput" type="text" maxlength="24" />
+          </label>
+          <div class="profile-row">
+            <input id="emailInput" type="email" placeholder="Email (optional)" />
+            <button id="sendCodeBtn" type="button">Send Code</button>
+          </div>
+          <div class="profile-row">
+            <input id="codeInput" type="text" placeholder="Enter code" />
+            <button id="verifyCodeBtn" type="button">Verify</button>
+          </div>
+          <small id="authStatus">Sign in with email code to sync profile.</small>
+          <button id="saveProfileBtn" type="button">Save Profile</button>
+        </div>
+        <div class="friends">
+          <h2>Friends</h2>
+          <div class="profile-row">
+            <input id="friendInput" type="text" placeholder="Invite username" />
+            <button id="inviteBtn" type="button">Invite</button>
+          </div>
+          <ul id="friendsList"></ul>
+        </div>
+        <div class="controls">
+          <button id="singleBtn" type="button">Single Player</button>
+          <button id="multiBtn" type="button">Local Multiplayer</button>
+          <button id="onlineBtn" type="button">Online Matchmaking</button>
+          <button id="restartBtn" type="button">Restart Match</button>
+        </div>
+        <small id="matchStatus">Offline mode.</small>
+        <p class="keys">
+          Player 1 (Blue): WASD (W jump/double-jump, S bat/charge shot)<br />
+          Player 2 (Red): Arrow keys (Up jump/double-jump, Down bat/charge shot)
+        </p>
+      </aside>
+    </main>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./game.js"></script>
+  </body>
+  </html>

@@ -1,0 +1,442 @@
+require("dotenv").config();
+
+const path = require("path");
+const http = require("http");
+const crypto = require("crypto");
+const express = require("express");
+const cors = require("cors");
+const { Server } = require("socket.io");
+const { Pool } = require("pg");
+const { v4: uuidv4 } = require("uuid");
+const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: "*" },
+});
+
+const PORT = process.env.PORT || 3000;
+const DB_URL = process.env.DB_URL;
+if (!DB_URL) {
+  throw new Error("Missing DB_URL in .env");
+}
+
+const pool = new Pool({ connectionString: DB_URL });
+const sesRegion = process.env.AWS_SES_REGION || process.env.AWS_REGION;
+const sesFromEmail = process.env.AWS_SES_FROM_EMAIL || "neel@calendarsociety.com";
+const sesClient = sesRegion ? new SESClient({ region: sesRegion }) : null;
+
+const sessions = new Map();
+const socketByUser = new Map();
+const matchQueue = [];
+const rooms = new Map();
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname)));
+
+function makeName() {
+  const left = ["Swift", "Nova", "Brave", "Pixel", "Echo", "Turbo", "Lunar"];
+  const right = ["Bat", "Dueler", "Panda", "Raven", "Knight", "Shark"];
+  return `${left[Math.floor(Math.random() * left.length)]}${right[Math.floor(Math.random() * right.length)]}${Math.floor(
+    Math.random() * 900 + 100
+  )}`;
+}
+
+function makeCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function makeToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+async function sendAuthCodeEmail(email, code) {
+  if (!sesClient) {
+    throw new Error("Missing AWS_SES_REGION (or AWS_REGION) in .env");
+  }
+  const command = new SendEmailCommand({
+    Source: sesFromEmail,
+    Destination: {
+      ToAddresses: [email],
+    },
+    Message: {
+      Subject: {
+        Data: "Your Bat Duel verification code",
+        Charset: "UTF-8",
+      },
+      Body: {
+        Text: {
+          Data: `Your Bat Duel login code is ${code}. It expires in 10 minutes.`,
+          Charset: "UTF-8",
+        },
+        Html: {
+          Data: `<p>Your Bat Duel login code is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`,
+          Charset: "UTF-8",
+        },
+      },
+    },
+  });
+  await sesClient.send(command);
+}
+
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY,
+      email TEXT UNIQUE,
+      username TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_codes (
+      id UUID PRIMARY KEY,
+      email TEXT NOT NULL,
+      code TEXT NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      used BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS friends (
+      user_id UUID NOT NULL,
+      friend_id UUID NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, friend_id)
+    );
+  `);
+}
+
+async function authMiddleware(req, res, next) {
+  const token = (req.headers.authorization || "").replace("Bearer ", "");
+  const userId = sessions.get(token);
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  req.userId = userId;
+  req.token = token;
+  next();
+}
+
+app.post("/api/auth/send-code", async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    if (!email) {
+      res.status(400).json({ error: "Email required" });
+      return;
+    }
+    const code = makeCode();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await pool.query(
+      "INSERT INTO auth_codes (id, email, code, expires_at) VALUES ($1, $2, $3, $4)",
+      [uuidv4(), email, code, expiresAt]
+    );
+    await sendAuthCodeEmail(email, code);
+    res.json({ ok: true });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("SES send error", err);
+    res.status(500).json({ error: "Failed to send email code" });
+  }
+});
+
+app.post("/api/auth/verify", async (req, res) => {
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const code = String(req.body.code || "").trim();
+  const usernameInput = String(req.body.username || "").trim();
+  if (!email || !code) {
+    res.status(400).json({ error: "Email and code required" });
+    return;
+  }
+
+  const codeRes = await pool.query(
+    `SELECT id FROM auth_codes
+     WHERE email = $1 AND code = $2 AND used = FALSE AND expires_at > NOW()
+     ORDER BY created_at DESC LIMIT 1`,
+    [email, code]
+  );
+  if (!codeRes.rowCount) {
+    res.status(400).json({ error: "Invalid or expired code" });
+    return;
+  }
+  await pool.query("UPDATE auth_codes SET used = TRUE WHERE id = $1", [codeRes.rows[0].id]);
+
+  let user = await pool.query("SELECT id, email, username FROM users WHERE email = $1", [email]);
+  if (!user.rowCount) {
+    const usernameBase = usernameInput || makeName();
+    const username = `${usernameBase.slice(0, 20)}${Math.floor(Math.random() * 99)}`;
+    const newUser = await pool.query(
+      "INSERT INTO users (id, email, username) VALUES ($1, $2, $3) RETURNING id, email, username",
+      [uuidv4(), email, username]
+    );
+    user = newUser;
+  }
+
+  const token = makeToken();
+  sessions.set(token, user.rows[0].id);
+  res.json({ token, user: user.rows[0] });
+});
+
+app.get("/api/profile", authMiddleware, async (req, res) => {
+  const user = await pool.query("SELECT id, email, username FROM users WHERE id = $1", [req.userId]);
+  res.json(user.rows[0]);
+});
+
+app.put("/api/profile", authMiddleware, async (req, res) => {
+  const username = String(req.body.username || "").trim();
+  if (!username) {
+    res.status(400).json({ error: "Username required" });
+    return;
+  }
+  try {
+    const updated = await pool.query(
+      "UPDATE users SET username = $1 WHERE id = $2 RETURNING id, email, username",
+      [username.slice(0, 24), req.userId]
+    );
+    res.json(updated.rows[0]);
+  } catch (err) {
+    res.status(400).json({ error: "Username already used" });
+  }
+});
+
+app.get("/api/friends", authMiddleware, async (req, res) => {
+  const friends = await pool.query(
+    `SELECT u.id, u.username, u.email
+     FROM friends f
+     JOIN users u ON u.id = f.friend_id
+     WHERE f.user_id = $1
+     ORDER BY u.username`,
+    [req.userId]
+  );
+  res.json({ friends: friends.rows });
+});
+
+app.post("/api/friends/invite", authMiddleware, async (req, res) => {
+  const username = String(req.body.username || "").trim();
+  if (!username) {
+    res.status(400).json({ error: "Friend username required" });
+    return;
+  }
+  const target = await pool.query("SELECT id FROM users WHERE username = $1", [username]);
+  if (!target.rowCount) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  const friendId = target.rows[0].id;
+  if (friendId === req.userId) {
+    res.status(400).json({ error: "Cannot add yourself" });
+    return;
+  }
+  await pool.query(
+    "INSERT INTO friends (user_id, friend_id) VALUES ($1, $2) ON CONFLICT (user_id, friend_id) DO NOTHING",
+    [req.userId, friendId]
+  );
+  await pool.query(
+    "INSERT INTO friends (user_id, friend_id) VALUES ($1, $2) ON CONFLICT (user_id, friend_id) DO NOTHING",
+    [friendId, req.userId]
+  );
+  res.json({ ok: true });
+});
+
+app.get("/api/health", (_, res) => {
+  res.json({ ok: true });
+});
+
+function newMatch(playerA, playerB) {
+  const roomId = uuidv4();
+  const players = [
+    {
+      id: playerA.userId,
+      socketId: playerA.socketId,
+      x: 220,
+      y: 0,
+      vx: 0,
+      health: 100,
+      facing: 1,
+      score: 0,
+      controls: {},
+      fireCooldown: 0,
+      color: "#2f7dff",
+    },
+    {
+      id: playerB.userId,
+      socketId: playerB.socketId,
+      x: 760,
+      y: 0,
+      vx: 0,
+      health: 100,
+      facing: -1,
+      score: 0,
+      controls: {},
+      fireCooldown: 0,
+      color: "#e44b4b",
+    },
+  ];
+  rooms.set(roomId, {
+    id: roomId,
+    round: 1,
+    players,
+    projectiles: [],
+    lockUntil: 0,
+  });
+  io.to(playerA.socketId).emit("match:start", { roomId, playerIndex: 0 });
+  io.to(playerB.socketId).emit("match:start", { roomId, playerIndex: 1 });
+}
+
+function updateRoom(room) {
+  const now = Date.now();
+  if (room.lockUntil > now) return;
+
+  for (const p of room.players) {
+    const left = !!p.controls.left;
+    const right = !!p.controls.right;
+    p.vx = 0;
+    if (left && !right) {
+      p.vx = -4;
+      p.facing = -1;
+    }
+    if (right && !left) {
+      p.vx = 4;
+      p.facing = 1;
+    }
+    p.x = Math.max(0, Math.min(994, p.x + p.vx));
+    p.fireCooldown = Math.max(0, p.fireCooldown - 1);
+    if (p.controls.attack && p.fireCooldown <= 0) {
+      const shooterIdx = room.players[0].id === p.id ? 0 : 1;
+      room.projectiles.push({
+        x: p.x + 20,
+        y: 540,
+        w: 18,
+        h: 8,
+        vx: p.facing * 9,
+        damage: 10,
+        targetIdx: shooterIdx === 0 ? 1 : 0,
+      });
+      p.fireCooldown = 5;
+    }
+  }
+
+  const p0 = room.players[0];
+  const p1 = room.players[1];
+
+  room.projectiles.forEach((shot) => {
+    shot.x += shot.vx;
+    const target = room.players[shot.targetIdx];
+    const hit =
+      shot.x < target.x + 46 &&
+      shot.x + shot.w > target.x &&
+      shot.y < 520 + 66 &&
+      shot.y + shot.h > 520;
+    if (hit) {
+      target.health = Math.max(0, target.health - shot.damage);
+      shot.dead = true;
+    }
+    if (shot.x < -100 || shot.x > 1200) shot.dead = true;
+  });
+  room.projectiles = room.projectiles.filter((s) => !s.dead);
+
+  if (p0.health <= 0 || p1.health <= 0) {
+    const winnerIdx = p0.health <= 0 ? 1 : 0;
+    room.players[winnerIdx].score += 1;
+    room.lockUntil = Date.now() + 1300;
+    room.round += 1;
+    if (room.round > 10) {
+      room.round = 1;
+      room.players.forEach((p) => {
+        p.score = 0;
+      });
+    }
+    p0.health = 100;
+    p1.health = 100;
+    p0.x = 220;
+    p1.x = 760;
+    room.projectiles = [];
+  }
+}
+
+setInterval(() => {
+  for (const room of rooms.values()) {
+    updateRoom(room);
+    io.to(room.id).emit("match:state", {
+      round: room.round,
+      players: room.players.map((p) => ({
+        id: p.id,
+        x: p.x,
+        health: p.health,
+        facing: p.facing,
+        score: p.score,
+        color: p.color,
+      })),
+      projectiles: room.projectiles,
+    });
+  }
+}, 1000 / 30);
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  const userId = sessions.get(token);
+  if (!userId) {
+    next(new Error("Unauthorized"));
+    return;
+  }
+  socket.userId = userId;
+  next();
+});
+
+io.on("connection", (socket) => {
+  socketByUser.set(socket.userId, socket.id);
+
+  socket.on("queue:join", () => {
+    const alreadyQueued = matchQueue.find((q) => q.userId === socket.userId);
+    if (alreadyQueued) return;
+    matchQueue.push({ userId: socket.userId, socketId: socket.id });
+    if (matchQueue.length >= 2) {
+      const a = matchQueue.shift();
+      const b = matchQueue.shift();
+      newMatch(a, b);
+    }
+  });
+
+  socket.on("match:input", (payload) => {
+    const room = [...rooms.values()].find((r) => r.players.some((p) => p.socketId === socket.id));
+    if (!room) return;
+    const idx = room.players.findIndex((p) => p.socketId === socket.id);
+    const player = room.players[idx];
+    if (!player) return;
+
+    player.controls = payload.controls || {};
+  });
+
+  socket.on("match:join", ({ roomId }) => {
+    if (rooms.has(roomId)) socket.join(roomId);
+  });
+
+  socket.on("disconnect", () => {
+    socketByUser.delete(socket.userId);
+    const queueIdx = matchQueue.findIndex((q) => q.socketId === socket.id);
+    if (queueIdx >= 0) matchQueue.splice(queueIdx, 1);
+    for (const [roomId, room] of rooms.entries()) {
+      if (room.players.some((p) => p.socketId === socket.id)) {
+        io.to(roomId).emit("match:end", { reason: "Opponent disconnected" });
+        rooms.delete(roomId);
+      }
+    }
+  });
+});
+
+initDb()
+  .then(() => {
+    server.listen(PORT, () => {
+      // eslint-disable-next-line no-console
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error("Failed to init DB", err);
+    process.exit(1);
+  });

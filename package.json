@@ -1,0 +1,23 @@
+{
+  "name": "doubledoof",
+  "version": "1.0.0",
+  "description": "2D web fighting game based on your game plan: - Single player (vs simple bot) and local multiplayer. - Player 1 (blue) uses WASD, Player 2 (red) uses Arrow keys. - Double-tap jump key for stronger jump. - Tap attack key for bat swing (10 damage, 1.5 body-length range). - Hold attack key to charge and release a projectile (10 to 50 damage over 10 seconds). - 100 HP each, 10 rounds, per-round scoring. - Different platform layouts by round. - Profile panel with generated username, editable/saved profile, demo email code verification, and friend invites.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.1036.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "pg": "^8.20.0",
+    "socket.io": "^4.8.3",
+    "uuid": "^14.0.0"
+  }
+}
