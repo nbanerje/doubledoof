@@ -1150,11 +1150,13 @@ const touchState = {
   left: false,
   right: false,
   jump: false,
+  jumpFromStick: false,
   attack: false,
   orb: false,
   prevLeft: false,
   prevRight: false,
   prevJump: false,
+  prevJumpFromStick: false,
   prevAttack: false,
   prevOrb: false,
 };
@@ -1164,7 +1166,7 @@ function onlineControlsFromInput() {
   return {
     left: keys.has(ok.left) || touchState.left,
     right: keys.has(ok.right) || touchState.right,
-    jump: keys.has(ok.jump) || touchState.jump,
+    jump: keys.has(ok.jump) || touchState.jump || touchState.jumpFromStick,
   };
 }
 
@@ -1662,14 +1664,17 @@ function applyTouchInput() {
     touchState.prevLeft = touchState.left;
     touchState.prevRight = touchState.right;
     touchState.prevJump = touchState.jump;
+    touchState.prevJumpFromStick = touchState.jumpFromStick;
     touchState.prevAttack = touchState.attack;
     touchState.prevOrb = touchState.orb;
     return;
   }
+  const jumpNow = touchState.jump || touchState.jumpFromStick;
+  const jumpPrev = touchState.prevJump || touchState.prevJumpFromStick;
 
   if (mode !== "online") {
     const b0 = keyBindings.p0;
-    if (touchState.jump && !touchState.prevJump) {
+    if (jumpNow && !jumpPrev) {
       tryJump(0, b0.jump);
     }
     if (touchState.attack && !touchState.prevAttack) {
@@ -1717,6 +1722,7 @@ function applyTouchInput() {
   touchState.prevLeft = touchState.left;
   touchState.prevRight = touchState.right;
   touchState.prevJump = touchState.jump;
+  touchState.prevJumpFromStick = touchState.jumpFromStick;
   touchState.prevAttack = touchState.attack;
   touchState.prevOrb = touchState.orb;
 }
@@ -2075,11 +2081,13 @@ function resetInputState() {
   touchState.left = false;
   touchState.right = false;
   touchState.jump = false;
+  touchState.jumpFromStick = false;
   touchState.attack = false;
   touchState.orb = false;
   touchState.prevLeft = false;
   touchState.prevRight = false;
   touchState.prevJump = false;
+  touchState.prevJumpFromStick = false;
   touchState.prevAttack = false;
   touchState.prevOrb = false;
   visualState[0].charging = false;
@@ -2859,6 +2867,7 @@ function setupUI() {
       const resetStick = () => {
         touchState.left = false;
         touchState.right = false;
+        touchState.jumpFromStick = false;
         if (touchStickEl) touchStickEl.style.transform = "translate(-50%, -50%)";
       };
       const moveStick = (clientX, clientY) => {
@@ -2876,6 +2885,7 @@ function setupUI() {
         }
         touchState.left = clampedX < -10;
         touchState.right = clampedX > 10;
+        touchState.jumpFromStick = clampedY < -14;
       };
       touchJoystickEl.addEventListener("pointerdown", (e) => {
         e.preventDefault();
