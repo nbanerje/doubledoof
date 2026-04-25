@@ -26,6 +26,9 @@ const MAX_CHARGE_MS = 12000;
 const CHARGE_SCALE_MS = 3200;
 const MELEE_RANGE = 48;
 const MELEE_KNOCKBACK_PX = 50;
+const STAFF_DAMAGE = 35;
+const STAFF_KNOCKBACK_PX = 70;
+const STAFF_COOLDOWN_MS = 500;
 const WINS_TO_END_MATCH = 5;
 const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
@@ -113,6 +116,13 @@ const LEVEL_PLATFORMS = [
     { x: 560, y: 335, w: 155, h: 14 },
   ],
 ];
+
+function weaponStatsForId(id) {
+  if (id === "staff") {
+    return { id: "staff", damage: STAFF_DAMAGE, knockback: STAFF_KNOCKBACK_PX, cooldownMs: STAFF_COOLDOWN_MS };
+  }
+  return { id: "sword", damage: 10, knockback: MELEE_KNOCKBACK_PX, cooldownMs: 0 };
+}
 
 function normalizeLevelIndex(idx) {
   return Math.max(0, Number.isInteger(idx) ? idx : 0) % LEVEL_PLATFORMS.length;
@@ -293,6 +303,8 @@ function createHostRoom(hostUserId, hostSocketId) {
       facing: 1,
       score: 0,
       controls: {},
+      weapon: "sword",
+      lastMeleeAt: 0,
       charging: false,
       chargeStart: 0,
       orbAmmo: ORB_AMMO_PER_ROUND,
@@ -313,6 +325,8 @@ function createHostRoom(hostUserId, hostSocketId) {
       facing: -1,
       score: 0,
       controls: {},
+      weapon: "sword",
+      lastMeleeAt: 0,
       charging: false,
       chargeStart: 0,
       orbAmmo: ORB_AMMO_PER_ROUND,
@@ -791,6 +805,7 @@ setInterval(() => {
         facing: p.facing,
         score: p.score,
         color: p.color,
+        weapon: p.weapon || "sword",
         charging: p.charging,
         fireBreath: !!p.fireBreath,
         fireBreathing: !!p.fireBreathing,
@@ -987,19 +1002,26 @@ io.on("connection", (socket) => {
       if (!player) return;
 
       player.controls = payload.controls || {};
+      if (payload.weapon === "staff" || payload.weapon === "sword") {
+        player.weapon = payload.weapon;
+      }
       if (payload.action === "melee") {
+        const weaponStats = weaponStatsForId(player.weapon);
+        const now = Date.now();
+        if (weaponStats.cooldownMs > 0 && now - (player.lastMeleeAt || 0) < weaponStats.cooldownMs) return;
+        player.lastMeleeAt = now;
         const meleeRange = MELEE_RANGE * (player.meleeRangeScale != null ? player.meleeRangeScale : 1);
         const inRange = Math.abs(player.x - enemy.x) <= meleeRange;
         const facingToward = (enemy.x - player.x) * player.facing > 0;
         if (inRange && facingToward) {
-          let meleeDamage = Math.round(10 * (player.damageMult || 1));
+          let meleeDamage = Math.round(weaponStats.damage * (player.damageMult || 1));
           if (idx === 0 && (room.blueMeleeBurstHits || 0) > 0) {
             meleeDamage = CHEAT_BLUE_MELEE_BURST_DAMAGE;
             room.blueMeleeBurstHits -= 1;
           }
           enemy.health = Math.max(0, enemy.health - meleeDamage);
           const dir = enemy.x >= player.x ? 1 : -1;
-          enemy.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, enemy.x + dir * MELEE_KNOCKBACK_PX));
+          enemy.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, enemy.x + dir * weaponStats.knockback));
         }
       }
       if (payload.action === "chargeStart") {

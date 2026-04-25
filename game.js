@@ -372,6 +372,10 @@ const SWING_DURATION_MS = 200;
 const MELEE_RANGE = 48;
 /** Horizontal push on defender when melee connects */
 const MELEE_KNOCKBACK_VX = 50;
+const STAFF_DAMAGE = 35;
+const STAFF_KNOCKBACK_VX = 70;
+const STAFF_COOLDOWN_MS = 500;
+const STAFF_SWING_FRAMES = 6;
 const FIRE_BREATH_RANGE = PLAYER_BODY_W * 1.5;
 const FIRE_BREATH_H = 20;
 const FIRE_BREATH_TICK_MS = 100;
@@ -417,6 +421,14 @@ const DRAGON_RUN_URLS = [
   "./assets/dragon-run-3.png",
   "./assets/dragon-run-4.png",
 ];
+const STAFF_SLAP_URLS = [
+  "./assets/staff-slap-1.png",
+  "./assets/staff-slap-2.png",
+  "./assets/staff-slap-3.png",
+  "./assets/staff-slap-4.png",
+  "./assets/staff-slap-5.png",
+  "./assets/staff-slap-6.png",
+];
 const MELEE_SWORD_URL = "./assets/melee-sword.png";
 const FIRE_BREATH_RIGHT_URL = "./assets/fire-breath-right-sheet.png";
 const FIRE_BREATH_LEFT_URL = "./assets/fire-breath-left-sheet.png";
@@ -431,6 +443,7 @@ const dragonIdleImage = new Image();
 const percivalRunImages = PERCIVAL_RUN_URLS.map(() => new Image());
 const guy2RunImages = GUY2_RUN_URLS.map(() => new Image());
 const dragonRunImages = DRAGON_RUN_URLS.map(() => new Image());
+const staffSlapImages = STAFF_SLAP_URLS.map(() => new Image());
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let percivalIdleBlit = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
@@ -454,6 +467,10 @@ let guy2Run = null;
  * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
  */
 let dragonRun = null;
+/**
+ * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
+ */
+let staffSlap = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let meleeSwordBlit = null;
 
@@ -640,6 +657,25 @@ for (let i = 0; i < dragonRunImages.length; i += 1) {
   dragonRunImages[i].onload = tryInitDragonRun;
   dragonRunImages[i].src = DRAGON_RUN_URLS[i];
   if (dragonRunImages[i].complete) tryInitDragonRun();
+}
+
+function tryInitStaffSlap() {
+  for (let i = 0; i < staffSlapImages.length; i += 1) {
+    const im = staffSlapImages[i];
+    if (!im.complete || !im.naturalWidth) return;
+  }
+  const frames = [];
+  for (let i = 0; i < staffSlapImages.length; i += 1) {
+    const b = buildPercivalIdleBlit(staffSlapImages[i]);
+    if (!b) return;
+    frames.push(b);
+  }
+  staffSlap = { frames };
+}
+for (let i = 0; i < staffSlapImages.length; i += 1) {
+  staffSlapImages[i].onload = tryInitStaffSlap;
+  staffSlapImages[i].src = STAFF_SLAP_URLS[i];
+  if (staffSlapImages[i].complete) tryInitStaffSlap();
 }
 
 function defaultKeyBindings() {
@@ -1041,7 +1077,7 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
   arcadeTitleEl.textContent = isCharacter ? "Pick Character" : "Pick Weapon";
   arcadeTextEl.textContent = isCharacter
     ? `${label}: choose from 6 character slots. Knight and Dragon are available right now.`
-    : `${label}: choose from 6 weapon slots. Only Sword is available right now.`;
+    : `${label}: choose from 6 weapon slots. Sword and Staff are available right now.`;
   arcadeActionsEl.innerHTML = "";
   arcadeActionsEl.classList.add("arcade-actions--char-pick");
   arcadeCardEl?.classList.add("arcade-card--wide");
@@ -1059,7 +1095,15 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
     if (loadout[selectedKey] === opt.id) btn.classList.add("selected");
     const preview = document.createElement("span");
     preview.className = `char-tile-preview char-tile-preview--${isCharacter ? "character" : "weapon"}`;
-    preview.textContent = opt.enabled ? (isCharacter ? (opt.id === "dragon" ? "D" : "K") : "S") : String(i + 1);
+    preview.textContent = opt.enabled
+      ? isCharacter
+        ? opt.id === "dragon"
+          ? "D"
+          : "K"
+        : opt.id === "staff"
+          ? "T"
+          : "S"
+      : String(i + 1);
     const text = document.createElement("span");
     text.className = "char-tile-label";
     text.textContent = opt.label;
@@ -1097,6 +1141,41 @@ function selectedCharacterForRender(idx) {
     return idx === playerIndex ? selectedOnlineLoadout.character : "knight";
   }
   return selectedLoadouts[idx]?.character || "knight";
+}
+
+function selectedWeaponForPlayer(idx, p = null) {
+  if (p?.weapon) return p.weapon;
+  if (mode === "online") {
+    return idx === playerIndex ? selectedOnlineLoadout.weapon : "sword";
+  }
+  return selectedLoadouts[idx]?.weapon || "sword";
+}
+
+function weaponStatsForId(id) {
+  if (id === "staff") {
+    return {
+      id: "staff",
+      damage: STAFF_DAMAGE,
+      knockback: STAFF_KNOCKBACK_VX,
+      cooldownMs: STAFF_COOLDOWN_MS,
+      swingDurationMs: STAFF_COOLDOWN_MS,
+      frames: STAFF_SWING_FRAMES,
+    };
+  }
+  return {
+    id: "sword",
+    damage: 10,
+    knockback: MELEE_KNOCKBACK_VX,
+    cooldownMs: 0,
+    swingDurationMs: SWING_DURATION_MS,
+    frames: 0,
+  };
+}
+
+function onlineInputPayload(action, controls) {
+  const payload = { controls, weapon: selectedOnlineLoadout.weapon || "sword" };
+  if (action) payload.action = action;
+  return payload;
 }
 
 /** Distinct level layouts; `getLevelForRound` cycles (first-to-5 match length is independent). */
@@ -1257,7 +1336,7 @@ const CHARACTER_OPTIONS = [
 ];
 const WEAPON_OPTIONS = [
   { id: "sword", label: "Sword", enabled: true },
-  { id: "locked-1", label: "Coming soon", enabled: false },
+  { id: "staff", label: "Staff", enabled: true },
   { id: "locked-2", label: "Coming soon", enabled: false },
   { id: "locked-3", label: "Coming soon", enabled: false },
   { id: "locked-4", label: "Coming soon", enabled: false },
@@ -1597,6 +1676,8 @@ function drawMeleeSwingIndicator(p, v, baseY) {
   const swingDur = v.swingDurationMs != null ? v.swingDurationMs : SWING_DURATION_MS;
   const swingT = clamp((now - v.attackStartAt) / Math.max(1, swingDur), 0, 1);
   const fac = p.facing || 1;
+  const idx = p.color === "#2f7dff" ? 0 : 1;
+  const weapon = selectedWeaponForPlayer(idx, p);
   const hx = Math.floor(p.x + PLAYER_BODY_W * 0.5);
   const hy = Math.floor(baseY + 24);
   const reach = MELEE_RANGE * (p.meleeRangeScale != null ? p.meleeRangeScale : 1) + 10;
@@ -1604,7 +1685,29 @@ function drawMeleeSwingIndicator(p, v, baseY) {
   const steps = Math.ceil(reach / 3);
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  if (meleeSwordBlit) {
+  if (weapon === "staff" && staffSlap?.frames?.length >= STAFF_SWING_FRAMES) {
+    const frameIdx = Math.min(STAFF_SWING_FRAMES - 1, Math.floor(swingT * STAFF_SWING_FRAMES));
+    const bl = staffSlap.frames[frameIdx];
+    const frameT = (frameIdx + 0.5) / STAFF_SWING_FRAMES;
+    const s = 72 / Math.max(1, bl.cw);
+    const w = bl.cw * s;
+    const h = bl.ch * s;
+    const handX = hx + fac * 6;
+    const handY = Math.floor(baseY + 20);
+    const ang = (0.62 - frameT) * Math.PI * 0.72;
+    ctx.save();
+    ctx.translate(handX, handY);
+    ctx.scale(fac, 1);
+    ctx.rotate(ang);
+    ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -8, -h * 0.5, w, h);
+    ctx.restore();
+    for (let i = 1; i < steps + 4; i += 1) {
+      const px = hx + fac * i * 3;
+      const py = hy + Math.sin((i / (steps + 4)) * Math.PI + frameIdx) * 4;
+      ctx.fillStyle = `rgba(245, 210, 150, ${0.08 + swingT * 0.16})`;
+      ctx.fillRect(Math.floor(px), Math.floor(py), 2, 2);
+    }
+  } else if (meleeSwordBlit) {
     const bl = meleeSwordBlit;
     const s = Math.max(1.85, 17 / bl.ch) / 13.2;
     const duelistSwordMult =
@@ -2020,27 +2123,26 @@ function applyTouchInput() {
   } else if (socket && roomId) {
     const controls = onlineControlsFromInput();
     if (touchState.left !== touchState.prevLeft || touchState.right !== touchState.prevRight) {
-      socket.emit("match:input", { controls });
+      socket.emit("match:input", onlineInputPayload(null, controls));
     }
     if (touchState.attack && !touchState.prevAttack && !onlineIntermissionActive()) {
-      triggerSwing(playerIndex);
-      socket.emit("match:input", { action: "melee", controls });
+      if (triggerSwing(playerIndex)) socket.emit("match:input", onlineInputPayload("melee", controls));
     }
     if (touchState.orb && !touchState.prevOrb && !onlineIntermissionActive()) {
       visualState[playerIndex].charging = true;
       visualState[playerIndex].chargeKeyDownAt = Date.now();
-      socket.emit("match:input", { action: "chargeStart", controls });
+      socket.emit("match:input", onlineInputPayload("chargeStart", controls));
     }
     if (!touchState.orb && touchState.prevOrb && !onlineIntermissionActive()) {
       visualState[playerIndex].charging = false;
       triggerSwing(playerIndex);
-      socket.emit("match:input", { action: "chargeRelease", controls });
+      socket.emit("match:input", onlineInputPayload("chargeRelease", controls));
     }
     if (touchState.fire && !touchState.prevFire && !onlineIntermissionActive()) {
-      socket.emit("match:input", { action: "fireStart", controls });
+      socket.emit("match:input", onlineInputPayload("fireStart", controls));
     }
     if (!touchState.fire && touchState.prevFire) {
-      socket.emit("match:input", { action: "fireEnd", controls });
+      socket.emit("match:input", onlineInputPayload("fireEnd", controls));
     }
   }
 
@@ -2266,6 +2368,14 @@ function getMeleeSwordBladeAabb(attacker, v, tNow) {
   if (swingT < 0.12 || swingT > 0.62) return null;
   const fac = attacker.facing || 1;
   const hx = Math.floor(attacker.x + PLAYER_BODY_W * 0.5);
+  const idx = attacker.color === "#2f7dff" ? 0 : 1;
+  if (selectedWeaponForPlayer(idx, attacker) === "staff") {
+    const mrs = attacker.meleeRangeScale != null ? attacker.meleeRangeScale : 1;
+    const bladeL = MELEE_RANGE * mrs;
+    const y0 = baseY + 10;
+    if (fac > 0) return { x: hx + 2, y: y0, w: bladeL, h: 28 };
+    return { x: hx - 2 - bladeL, y: y0, w: bladeL, h: 28 };
+  }
   if (!meleeSwordBlit) {
     const mrs = attacker.meleeRangeScale != null ? attacker.meleeRangeScale : 1;
     const bladeL = 28 * mrs;
@@ -2324,13 +2434,14 @@ function processMeleeSwordHits() {
     if (rectsOverlap(blade, defRect)) {
       vA.meleeDealt = true;
       const mult = at.damageMult != null ? at.damageMult : 1;
-      let dmg = Math.round(10 * mult);
+      const weaponStats = weaponStatsForId(selectedWeaponForPlayer(ai, at));
+      let dmg = Math.round(weaponStats.damage * mult);
       if (ai === 0 && cheatBlueMeleeBurstHits > 0) {
         dmg = CHEAT_BLUE_MELEE_BURST_DAMAGE;
         cheatBlueMeleeBurstHits -= 1;
       }
       def.health = clamp(def.health - dmg, 0, playerMaxHp(def));
-      def.vx = (def.x >= at.x ? 1 : -1) * MELEE_KNOCKBACK_VX;
+      def.vx = (def.x >= at.x ? 1 : -1) * weaponStats.knockback;
     }
   }
 }
@@ -2380,22 +2491,32 @@ function tryJump(idx, code) {
 
 function doMelee(attackerIdx) {
   const attacker = localState.players[attackerIdx];
-  const dur = Math.round(SWING_DURATION_MS * (attacker.meleeSwingScale != null ? attacker.meleeSwingScale : 1));
   const t0 = Date.now();
+  const weaponStats = weaponStatsForId(selectedWeaponForPlayer(attackerIdx, attacker));
+  const v = visualState[attackerIdx];
+  if (weaponStats.cooldownMs > 0 && t0 < (v.nextMeleeAt || 0)) return false;
+  const dur = Math.round(weaponStats.swingDurationMs * (attacker.meleeSwingScale != null ? attacker.meleeSwingScale : 1));
   visualState[attackerIdx].attackStartAt = t0;
   visualState[attackerIdx].attackUntil = t0 + dur;
   visualState[attackerIdx].swingDurationMs = dur;
   visualState[attackerIdx].meleeDealt = false;
+  visualState[attackerIdx].nextMeleeAt = t0 + weaponStats.cooldownMs;
+  return true;
 }
 
 function triggerSwing(idx) {
   const p = localState.players[idx];
-  const dur = Math.round(SWING_DURATION_MS * (p.meleeSwingScale != null ? p.meleeSwingScale : 1));
   const t0 = Date.now();
+  const weaponStats = weaponStatsForId(selectedWeaponForPlayer(idx, p));
+  const v = visualState[idx];
+  if (weaponStats.cooldownMs > 0 && t0 < (v.nextMeleeAt || 0)) return false;
+  const dur = Math.round(weaponStats.swingDurationMs * (p.meleeSwingScale != null ? p.meleeSwingScale : 1));
   visualState[idx].attackStartAt = t0;
   visualState[idx].attackUntil = t0 + dur;
   visualState[idx].swingDurationMs = dur;
   visualState[idx].meleeDealt = false;
+  visualState[idx].nextMeleeAt = t0 + weaponStats.cooldownMs;
+  return true;
 }
 
 function computeChargedShot(heldMs) {
@@ -3354,18 +3475,17 @@ window.addEventListener("keydown", (e) => {
     const ok = onlineK();
     const controls = onlineControlsFromInput();
     if (e.code === ok.melee && !e.repeat && !onlineIntermissionActive()) {
-      triggerSwing(playerIndex);
-      socket.emit("match:input", { action: "melee", controls });
+      if (triggerSwing(playerIndex)) socket.emit("match:input", onlineInputPayload("melee", controls));
     }
     if (e.code === ok.orb && !onlineIntermissionActive()) {
       visualState[playerIndex].charging = true;
       visualState[playerIndex].chargeKeyDownAt = Date.now();
-      socket.emit("match:input", { action: "chargeStart", controls });
+      socket.emit("match:input", onlineInputPayload("chargeStart", controls));
     }
     if (localState.players[playerIndex]?.fireBreath && ok.fire && e.code === ok.fire && !e.repeat && !onlineIntermissionActive()) {
-      socket.emit("match:input", { action: "fireStart", controls });
+      socket.emit("match:input", onlineInputPayload("fireStart", controls));
     }
-    socket.emit("match:input", { controls });
+    socket.emit("match:input", onlineInputPayload(null, controls));
   }
 });
 
@@ -3405,12 +3525,12 @@ window.addEventListener("keyup", (e) => {
     if (e.code === ok.orb && !onlineIntermissionActive()) {
       const heldMs = Date.now() - (visualState[playerIndex].chargeKeyDownAt || Date.now());
       visualState[playerIndex].charging = false;
-      socket.emit("match:input", { action: "chargeRelease", controls });
+      socket.emit("match:input", onlineInputPayload("chargeRelease", controls));
     }
     if (ok.fire && e.code === ok.fire) {
-      socket.emit("match:input", { action: "fireEnd", controls });
+      socket.emit("match:input", onlineInputPayload("fireEnd", controls));
     }
-    socket.emit("match:input", { controls });
+    socket.emit("match:input", onlineInputPayload(null, controls));
   }
 });
 
