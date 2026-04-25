@@ -315,7 +315,7 @@ const SWING_DURATION_MS = 200;
 /** Bat swing reach (shorter than before) */
 const MELEE_RANGE = 48;
 /** Horizontal push on defender when melee connects */
-const MELEE_KNOCKBACK_VX = 32;
+const MELEE_KNOCKBACK_VX = 50;
 const DEFAULT_MAX_HP = 100;
 const TANK_BUFF_MAX_HP = 130;
 /** A match ends as soon as one side reaches this many round wins. */
@@ -1027,7 +1027,11 @@ let mode = "single";
 /** Konami-style: last digit keys typed (digits only); `2017` → red (P2) gets 1000 max HP in local play. */
 let cheatRedDigitBuffer = "";
 let cheatRedThousandHp = false;
+let cheatBlueMeleeBurstHits = 0;
+let cheatBlueMeleeBurstPendingOnlineHits = 0;
 const CHEAT_RED_MAX_HP = 1000;
+const CHEAT_BLUE_MELEE_BURST_DAMAGE = 1000;
+const CHEAT_BLUE_MELEE_BURST_HITS = 5;
 let socket = null;
 let roomId = null;
 let playerIndex = 0;
@@ -1946,7 +1950,11 @@ function processMeleeSwordHits() {
     if (rectsOverlap(blade, defRect)) {
       vA.meleeDealt = true;
       const mult = at.damageMult != null ? at.damageMult : 1;
-      const dmg = Math.round(10 * mult);
+      let dmg = Math.round(10 * mult);
+      if (ai === 0 && cheatBlueMeleeBurstHits > 0) {
+        dmg = CHEAT_BLUE_MELEE_BURST_DAMAGE;
+        cheatBlueMeleeBurstHits -= 1;
+      }
       def.health = clamp(def.health - dmg, 0, playerMaxHp(def));
       def.vx = (def.x >= at.x ? 1 : -1) * MELEE_KNOCKBACK_VX;
     }
@@ -2139,20 +2147,34 @@ function applyRedThousandHpCheat() {
   showBanner("Red — 1000 HP", 2000);
 }
 
+function applyBlueMeleeBurstCheat() {
+  if (mode === "online") {
+    if (socket && roomId) socket.emit("cheat:blue_melee_burst", { hits: CHEAT_BLUE_MELEE_BURST_HITS });
+    else cheatBlueMeleeBurstPendingOnlineHits += CHEAT_BLUE_MELEE_BURST_HITS;
+  } else {
+    cheatBlueMeleeBurstHits += CHEAT_BLUE_MELEE_BURST_HITS;
+  }
+  showBanner("Blue melee: 1000 dmg for next 5 hits", 2200);
+}
+
 /**
  * Call from global keydown (before game / buff handlers). Digits only extend the buffer.
  */
 function tryRedThousandHpCheatFromKeydown(e) {
-  if (cheatRedThousandHp) return;
   if (remapState.active) return;
   if (e.repeat) return;
   if (isTypingInFormField()) return;
   const d = keyCodeToCheatDigit(e.code);
   if (!d) return;
   cheatRedDigitBuffer = (cheatRedDigitBuffer + d).slice(-4);
-  if (cheatRedDigitBuffer === "2017") {
+  if (!cheatRedThousandHp && cheatRedDigitBuffer === "2017") {
     cheatRedDigitBuffer = "";
     applyRedThousandHpCheat();
+    return;
+  }
+  if (cheatRedDigitBuffer === "6767") {
+    cheatRedDigitBuffer = "";
+    applyBlueMeleeBurstCheat();
   }
 }
 
@@ -2574,6 +2596,10 @@ function setupSocket() {
     playerIndex = payload.playerIndex;
     socket.emit("match:join", { roomId });
     mode = "online";
+    if (cheatBlueMeleeBurstPendingOnlineHits > 0) {
+      socket.emit("cheat:blue_melee_burst", { hits: cheatBlueMeleeBurstPendingOnlineHits });
+      cheatBlueMeleeBurstPendingOnlineHits = 0;
+    }
     showBanner(playerIndex === 0 ? "You’re blue (host)" : "You’re red — fight!");
     setMatchStatus(`Online · ${roomId.slice(0, 8)}…`);
     hideArcadeOverlay();

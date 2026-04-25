@@ -25,22 +25,97 @@ const BUFF_PICK_GATE_MS = 2000;
 const MAX_CHARGE_MS = 12000;
 const CHARGE_SCALE_MS = 3200;
 const MELEE_RANGE = 48;
+const MELEE_KNOCKBACK_PX = 50;
 const WINS_TO_END_MATCH = 5;
 const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
 const ORB_AMMO_PER_ROUND = 10;
 const AMMO_RELOAD_IDLE_MS = 5000;
 const AMMO_RELOAD_AMOUNT = 5;
+const CHEAT_BLUE_MELEE_BURST_DAMAGE = 1000;
+const CHEAT_BLUE_MELEE_BURST_HITS = 5;
 const VIEW_W = 1040;
 const FLOOR_Y = 560;
 const PLAYER_BODY_W = 36;
 const PLAYER_BODY_H = 48;
 const PLAYER_TOP_Y = FLOOR_Y - PLAYER_BODY_H;
 const GRAVITY = 0.7;
+const CHARGE_AIR_GRAVITY_MULT = 0.26;
 const JUMP_VELOCITY = -12.5;
 const POWER_BUFF_DAMAGE_MULT = 1.35;
 const TANK_BUFF_MAX_HP = 130;
 const BUFF_POOL = ["triple", "tank", "power", "infiniteJumps", "infiniteAmmo", "instantMaxCharge", "meleeLong"];
+const LEVEL_PLATFORMS = [
+  [
+    { x: 140, y: 490, w: 180, h: 14 },
+    { x: 420, y: 430, w: 210, h: 14 },
+    { x: 760, y: 500, w: 170, h: 14 },
+    { x: 620, y: 340, w: 150, h: 14 },
+  ],
+  [
+    { x: 90, y: 485, w: 170, h: 14 },
+    { x: 360, y: 415, w: 220, h: 14 },
+    { x: 680, y: 495, w: 200, h: 14 },
+    { x: 540, y: 330, w: 160, h: 14 },
+  ],
+  [
+    { x: 120, y: 500, w: 200, h: 14 },
+    { x: 400, y: 445, w: 180, h: 14 },
+    { x: 720, y: 475, w: 175, h: 14 },
+    { x: 580, y: 355, w: 155, h: 14 },
+  ],
+  [
+    { x: 160, y: 478, w: 150, h: 14 },
+    { x: 330, y: 380, w: 240, h: 14 },
+    { x: 640, y: 510, w: 190, h: 14 },
+    { x: 800, y: 420, w: 130, h: 14 },
+  ],
+  [
+    { x: 110, y: 492, w: 190, h: 14 },
+    { x: 380, y: 438, w: 200, h: 14 },
+    { x: 650, y: 488, w: 210, h: 14 },
+    { x: 500, y: 320, w: 170, h: 14 },
+  ],
+  [
+    { x: 130, y: 505, w: 175, h: 14 },
+    { x: 410, y: 360, w: 165, h: 14 },
+    { x: 610, y: 455, w: 195, h: 14 },
+    { x: 780, y: 385, w: 145, h: 14 },
+  ],
+  [
+    { x: 70, y: 470, w: 160, h: 14 },
+    { x: 280, y: 400, w: 260, h: 14 },
+    { x: 600, y: 500, w: 180, h: 14 },
+    { x: 850, y: 450, w: 120, h: 14 },
+  ],
+  [
+    { x: 150, y: 488, w: 165, h: 14 },
+    { x: 450, y: 425, w: 195, h: 14 },
+    { x: 740, y: 498, w: 165, h: 14 },
+    { x: 590, y: 348, w: 145, h: 14 },
+  ],
+  [
+    { x: 100, y: 495, w: 185, h: 14 },
+    { x: 350, y: 430, w: 225, h: 14 },
+    { x: 670, y: 465, w: 185, h: 14 },
+    { x: 520, y: 365, w: 150, h: 14 },
+  ],
+  [
+    { x: 140, y: 500, w: 175, h: 14 },
+    { x: 400, y: 395, w: 200, h: 14 },
+    { x: 700, y: 505, w: 170, h: 14 },
+    { x: 560, y: 335, w: 155, h: 14 },
+  ],
+];
+
+function currentPlatformsForRound(round) {
+  const idx = (Math.max(1, round) - 1) % LEVEL_PLATFORMS.length;
+  return LEVEL_PLATFORMS[idx];
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
 
 function chargedShotFromHeldMs(heldMs) {
   const effective = Math.max(0, Math.min(heldMs - CHARGE_THRESHOLD_MS, CHARGE_SCALE_MS));
@@ -168,6 +243,7 @@ function createHostRoom(hostUserId, hostSocketId) {
       vx: 0,
       vy: 0,
       onGround: true,
+      jumpsUsed: 0,
       jumpHeld: false,
       health: 100,
       facing: 1,
@@ -187,6 +263,7 @@ function createHostRoom(hostUserId, hostSocketId) {
       vx: 0,
       vy: 0,
       onGround: true,
+      jumpsUsed: 0,
       jumpHeld: false,
       health: 100,
       facing: -1,
@@ -212,6 +289,7 @@ function createHostRoom(hostUserId, hostSocketId) {
     buffPickInputUnlocked: false,
     buffUnlockAt: 0,
     buffLastOfferedKey: null,
+    blueMeleeBurstHits: 0,
   });
   io.to(hostSocketId).emit("match:start", { roomId, playerIndex: 0 });
   return roomId;
@@ -459,6 +537,7 @@ app.get("/api/health", (_, res) => {
 
 function updateRoom(room) {
   const now = Date.now();
+  const platforms = currentPlatformsForRound(room.round);
   if (room.buffPickActive) {
     if (!room.buffPickInputUnlocked && now >= room.buffUnlockAt) {
       room.buffPickInputUnlocked = true;
@@ -490,19 +569,47 @@ function updateRoom(room) {
       p.vx = 4;
       p.facing = 1;
     }
-    if (jump && !p.jumpHeld && (p.onGround || p.infiniteJumps)) {
-      p.vy = JUMP_VELOCITY;
-      p.onGround = false;
+    if (jump && !p.jumpHeld) {
+      if (p.infiniteJumps) {
+        p.vy = JUMP_VELOCITY;
+        p.onGround = false;
+        p.jumpsUsed = Math.min((p.jumpsUsed || 0) + 1, 9);
+      } else if (p.onGround || (p.jumpsUsed || 0) < 2) {
+        p.vy = JUMP_VELOCITY;
+        p.onGround = false;
+        p.jumpsUsed = (p.jumpsUsed || 0) + 1;
+      }
     }
     p.jumpHeld = jump;
-    p.vy += GRAVITY;
+    const previousBottom = p.y + PLAYER_BODY_H;
+    const slowFall = p.charging && !p.onGround;
+    p.vy += GRAVITY * (slowFall ? CHARGE_AIR_GRAVITY_MULT : 1);
+    p.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, p.x + p.vx));
     p.y += p.vy;
-    if (p.y >= PLAYER_TOP_Y) {
+    const bottom = p.y + PLAYER_BODY_H;
+    let landed = false;
+    if (p.vy >= 0) {
+      for (const plat of platforms) {
+        const crossed = previousBottom <= plat.y && bottom >= plat.y;
+        const insideX = p.x + PLAYER_BODY_W > plat.x && p.x < plat.x + plat.w;
+        if (crossed && insideX) {
+          p.y = plat.y - PLAYER_BODY_H;
+          p.vy = 0;
+          p.onGround = true;
+          p.jumpsUsed = 0;
+          landed = true;
+          break;
+        }
+      }
+    }
+    if (!landed && p.y >= PLAYER_TOP_Y) {
       p.y = PLAYER_TOP_Y;
       p.vy = 0;
       p.onGround = true;
+      p.jumpsUsed = 0;
+    } else if (!landed) {
+      p.onGround = false;
     }
-    p.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, p.x + p.vx));
   }
 
   const p0 = room.players[0];
@@ -511,6 +618,14 @@ function updateRoom(room) {
   room.projectiles.forEach((shot) => {
     shot.x += shot.vx;
     shot.y += shot.vy || 0;
+    const shotRect = { x: shot.x, y: shot.y, w: shot.w, h: shot.h };
+    for (const plat of platforms) {
+      if (rectsOverlap(shotRect, plat)) {
+        shot.dead = true;
+        break;
+      }
+    }
+    if (shot.dead) return;
     const target = room.players[shot.targetIdx];
     const hit =
       shot.x < target.x + PLAYER_BODY_W &&
@@ -552,6 +667,8 @@ function updateRoom(room) {
     p1.vy = 0;
     p0.onGround = true;
     p1.onGround = true;
+    p0.jumpsUsed = 0;
+    p1.jumpsUsed = 0;
     room.projectiles = [];
     room.players.forEach((p) => {
       p.charging = false;
@@ -757,6 +874,14 @@ io.on("connection", (socket) => {
       /* client-only UI cleanup; no server state */
     });
 
+    socket.on("cheat:blue_melee_burst", ({ hits }) => {
+      const room = [...rooms.values()].find((r) => r.players.some((p) => p.socketId === socket.id));
+      if (!room) return;
+      const parsed = Number(hits);
+      const grant = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : CHEAT_BLUE_MELEE_BURST_HITS;
+      room.blueMeleeBurstHits = (room.blueMeleeBurstHits || 0) + grant;
+    });
+
     socket.on("match:input", (payload) => {
       const room = [...rooms.values()].find((r) => r.players.some((p) => p.socketId === socket.id));
       if (!room) return;
@@ -771,7 +896,14 @@ io.on("connection", (socket) => {
         const inRange = Math.abs(player.x - enemy.x) <= meleeRange;
         const facingToward = (enemy.x - player.x) * player.facing > 0;
         if (inRange && facingToward) {
-          enemy.health = Math.max(0, enemy.health - Math.round(10 * (player.damageMult || 1)));
+          let meleeDamage = Math.round(10 * (player.damageMult || 1));
+          if (idx === 0 && (room.blueMeleeBurstHits || 0) > 0) {
+            meleeDamage = CHEAT_BLUE_MELEE_BURST_DAMAGE;
+            room.blueMeleeBurstHits -= 1;
+          }
+          enemy.health = Math.max(0, enemy.health - meleeDamage);
+          const dir = enemy.x >= player.x ? 1 : -1;
+          enemy.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, enemy.x + dir * MELEE_KNOCKBACK_PX));
         }
       }
       if (payload.action === "chargeStart") {
