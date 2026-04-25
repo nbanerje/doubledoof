@@ -549,7 +549,8 @@ function defaultKeyBindings() {
       left: "KeyA",
       right: "KeyD",
       jump: "KeyW",
-      attack: "KeyS",
+      melee: "KeyF",
+      orb: "KeyS",
     },
   };
 }
@@ -572,6 +573,8 @@ function loadKeyBindings() {
     if (!keyBindings.p1.charge) keyBindings.p1.charge = def.p1.charge;
     keyBindings.p0.attack = keyBindings.p0.charge;
     keyBindings.p1.attack = keyBindings.p1.charge;
+    if (!keyBindings.online.melee) keyBindings.online.melee = def.online.melee;
+    if (!keyBindings.online.orb) keyBindings.online.orb = keyBindings.online.attack || def.online.orb;
   } catch (_) {
     /* ignore */
   }
@@ -606,7 +609,8 @@ function bindingCodesFlat() {
   add(online.left);
   add(online.right);
   add(online.jump);
-  add(online.attack);
+  add(online.melee);
+  add(online.orb);
   return s;
 }
 
@@ -659,7 +663,7 @@ function describeBindings(playerIdx) {
 
 function describeOnlineBindings() {
   const b = keyBindings.online;
-  return `Move <kbd>${formatKeyLabel(b.left)}</kbd> / <kbd>${formatKeyLabel(b.right)}</kbd>, jump <kbd>${formatKeyLabel(b.jump)}</kbd>, attack <kbd>${formatKeyLabel(b.attack)}</kbd> (tap / hold + release)`;
+  return `Move <kbd>${formatKeyLabel(b.left)}</kbd> / <kbd>${formatKeyLabel(b.right)}</kbd>, jump <kbd>${formatKeyLabel(b.jump)}</kbd>, melee <kbd>${formatKeyLabel(b.melee)}</kbd>, orb <kbd>${formatKeyLabel(b.orb)}</kbd>`;
 }
 
 function wizardFieldsForPlayer() {
@@ -677,7 +681,8 @@ function wizardFieldsOnline() {
     { id: "left", label: "Move left" },
     { id: "right", label: "Move right" },
     { id: "jump", label: "Jump" },
-    { id: "attack", label: "Melee tap / hold to charge, release to shoot" },
+    { id: "melee", label: "Melee attack" },
+    { id: "orb", label: "Orb charge/shot" },
   ];
 }
 
@@ -873,7 +878,7 @@ function renderOnlineControlChoice() {
   stepLabelEl.textContent = "Control setup";
   arcadeTitleEl.textContent = "Your keys (online)";
   arcadeTextEl.textContent =
-    "Map movement and attack before you enter the lobby. These keys apply on blue or red side.";
+    "Map movement, jump, melee, and orb before you enter the lobby. These keys apply on blue or red side.";
   arcadeActionsEl.innerHTML = "";
   if (arcadeExtraEl) arcadeExtraEl.innerHTML = `<p class="arcade-bind-summary">${describeOnlineBindings()}</p>`;
 
@@ -1136,6 +1141,8 @@ const arcadeActionsEl = document.getElementById("arcadeActions");
 const settingsDrawerEl = document.getElementById("settingsDrawer");
 const settingsBackdropEl = document.getElementById("settingsBackdrop");
 const touchOverlayEl = document.getElementById("touchOverlay");
+const touchJoystickEl = document.getElementById("touchJoystick");
+const touchStickEl = document.getElementById("touchStick");
 const isTouchDevice =
   window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window || navigator.maxTouchPoints > 0;
 const touchState = {
@@ -1692,8 +1699,8 @@ function applyTouchInput() {
       socket.emit("match:input", { controls });
     }
     if (touchState.attack && !touchState.prevAttack && !onlineIntermissionActive()) {
-      socket.emit("match:input", { action: "chargeStart", controls });
-      socket.emit("match:input", { action: "chargeRelease", controls });
+      triggerSwing(playerIndex);
+      socket.emit("match:input", { action: "melee", controls });
     }
     if (touchState.orb && !touchState.prevOrb && !onlineIntermissionActive()) {
       visualState[playerIndex].charging = true;
@@ -2764,7 +2771,11 @@ window.addEventListener("keydown", (e) => {
   if (mode === "online" && socket && roomId) {
     const ok = onlineK();
     const controls = onlineControlsFromInput();
-    if (e.code === ok.attack && !onlineIntermissionActive()) {
+    if (e.code === ok.melee && !e.repeat && !onlineIntermissionActive()) {
+      triggerSwing(playerIndex);
+      socket.emit("match:input", { action: "melee", controls });
+    }
+    if (e.code === ok.orb && !onlineIntermissionActive()) {
       visualState[playerIndex].charging = true;
       visualState[playerIndex].chargeKeyDownAt = Date.now();
       socket.emit("match:input", { action: "chargeStart", controls });
@@ -2804,10 +2815,9 @@ window.addEventListener("keyup", (e) => {
   if (mode === "online" && socket && roomId) {
     const ok = onlineK();
     const controls = onlineControlsFromInput();
-    if (e.code === ok.attack && !onlineIntermissionActive()) {
+    if (e.code === ok.orb && !onlineIntermissionActive()) {
       const heldMs = Date.now() - (visualState[playerIndex].chargeKeyDownAt || Date.now());
       visualState[playerIndex].charging = false;
-      triggerSwing(playerIndex);
       socket.emit("match:input", { action: "chargeRelease", controls });
     }
     socket.emit("match:input", { controls });
@@ -2843,6 +2853,43 @@ function setupUI() {
       btn.addEventListener("pointercancel", () => applyTouchAction(action, false));
       btn.addEventListener("pointerleave", () => applyTouchAction(action, false));
     });
+
+    if (touchJoystickEl) {
+      const JOY_RADIUS = 34;
+      const resetStick = () => {
+        touchState.left = false;
+        touchState.right = false;
+        if (touchStickEl) touchStickEl.style.transform = "translate(-50%, -50%)";
+      };
+      const moveStick = (clientX, clientY) => {
+        const rect = touchJoystickEl.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dx = clientX - cx;
+        const dy = clientY - cy;
+        const dist = Math.hypot(dx, dy);
+        const scale = dist > JOY_RADIUS ? JOY_RADIUS / dist : 1;
+        const clampedX = dx * scale;
+        const clampedY = dy * scale;
+        if (touchStickEl) {
+          touchStickEl.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
+        }
+        touchState.left = clampedX < -10;
+        touchState.right = clampedX > 10;
+      };
+      touchJoystickEl.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        moveStick(e.clientX, e.clientY);
+      });
+      touchJoystickEl.addEventListener("pointermove", (e) => {
+        if ((e.buttons & 1) === 0) return;
+        e.preventDefault();
+        moveStick(e.clientX, e.clientY);
+      });
+      touchJoystickEl.addEventListener("pointerup", resetStick);
+      touchJoystickEl.addEventListener("pointercancel", resetStick);
+      touchJoystickEl.addEventListener("pointerleave", resetStick);
+    }
   }
 
   document.getElementById("singleBtn").addEventListener("click", () => {

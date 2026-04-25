@@ -766,20 +766,21 @@ io.on("connection", (socket) => {
       if (!player) return;
 
       player.controls = payload.controls || {};
+      if (payload.action === "melee") {
+        const meleeRange = MELEE_RANGE * (player.meleeRangeScale != null ? player.meleeRangeScale : 1);
+        const inRange = Math.abs(player.x - enemy.x) <= meleeRange;
+        const facingToward = (enemy.x - player.x) * player.facing > 0;
+        if (inRange && facingToward) {
+          enemy.health = Math.max(0, enemy.health - Math.round(10 * (player.damageMult || 1)));
+        }
+      }
       if (payload.action === "chargeStart") {
         player.charging = true;
         player.chargeStart = Date.now();
       }
       if (payload.action === "chargeRelease" && player.charging) {
         const heldMs = Date.now() - player.chargeStart;
-        if (heldMs < MELEE_QUICK_TAP_MS) {
-          const meleeRange = MELEE_RANGE * (player.meleeRangeScale != null ? player.meleeRangeScale : 1);
-          const inRange = Math.abs(player.x - enemy.x) <= meleeRange;
-          const facingToward = (enemy.x - player.x) * player.facing > 0;
-          if (inRange && facingToward) {
-            enemy.health = Math.max(0, enemy.health - Math.round(10 * (player.damageMult || 1)));
-          }
-        } else {
+        if (heldMs >= MELEE_QUICK_TAP_MS) {
           const orbCost = player.tripleShot ? 3 : 1;
           const ammo = player.orbAmmo != null ? player.orbAmmo : ORB_AMMO_PER_ROUND;
           if (!player.infiniteAmmo && ammo < orbCost) {

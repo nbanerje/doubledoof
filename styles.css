@@ -666,7 +666,33 @@ button.lobby-decline {
 .touch-cluster {
   display: flex;
   gap: 8px;
+  align-items: flex-end;
   pointer-events: auto;
+}
+
+.touch-joystick {
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  border: 1px solid rgba(140, 170, 235, 0.7);
+  background: rgba(18, 28, 54, 0.58);
+  position: relative;
+  touch-action: none;
+  user-select: none;
+}
+
+.touch-stick {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(126, 200, 255, 0.9);
+  border: 1px solid rgba(220, 240, 255, 0.9);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
 }
 
 .touch-btn {
