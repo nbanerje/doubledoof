@@ -24,6 +24,7 @@ const ROUND_INTERMISSION_MS = 4000;
 const MAX_CHARGE_MS = 12000;
 const CHARGE_SCALE_MS = 3200;
 const MELEE_RANGE = 48;
+const WINS_TO_END_MATCH = 5;
 const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
 const VIEW_W = 1040;
@@ -42,9 +43,11 @@ function chargedShotFromHeldMs(heldMs) {
   const speed = 9 + 4 * curved;
   return { damage, w, h, speed };
 }
-const DB_URL = process.env.DB_URL;
+const DB_URL = process.env.DB_URL || process.env.DATABASE_URL;
 if (!DB_URL) {
-  throw new Error("Missing DB_URL in .env");
+  throw new Error(
+    "Missing DB_URL or DATABASE_URL. Locally: set in .env. On Render: Dashboard → your Web Service → Environment → add DB_URL (Neon connection string)."
+  );
 }
 
 const pool = new Pool({ connectionString: DB_URL });
@@ -356,15 +359,17 @@ function updateRoom(room) {
   if (p0.health <= 0 || p1.health <= 0) {
     const winnerIdx = p0.health <= 0 ? 1 : 0;
     room.players[winnerIdx].score += 1;
+    const s0 = room.players[0].score;
+    const s1 = room.players[1].score;
+    if (s0 >= WINS_TO_END_MATCH || s1 >= WINS_TO_END_MATCH) {
+      room.round = 1;
+      room.players[0].score = 0;
+      room.players[1].score = 0;
+    } else {
+      room.round += 1;
+    }
     room.intermissionStartedAt = Date.now();
     room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
-    room.round += 1;
-    if (room.round > 10) {
-      room.round = 1;
-      room.players.forEach((p) => {
-        p.score = 0;
-      });
-    }
     p0.health = 100;
     p1.health = 100;
     p0.x = 220;
