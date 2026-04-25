@@ -2520,6 +2520,13 @@ function setupSocket() {
     hideArcadeOverlay();
   });
 
+  socket.on("match:countdown", ({ seconds }) => {
+    hideArcadeOverlay();
+    const s = Number.isFinite(seconds) ? seconds : 3;
+    setMatchStatus(`Opponent joined. Starting in ${s}...`);
+    showBanner(`Starting in ${s}...`, 1200);
+  });
+
   socket.on("match:state", (state) => {
     localState = {
       round: state.round,

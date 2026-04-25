@@ -179,7 +179,12 @@ function attachGuestToRoom(roomId, guestUserId, guestSocketId) {
   }
   p1.id = guestUserId;
   p1.socketId = guestSocketId;
+  const now = Date.now();
+  room.intermissionStartedAt = now;
+  room.lockUntil = now + 3000;
   io.to(guestSocketId).emit("match:start", { roomId, playerIndex: 1 });
+  io.to(room.players[0].socketId).emit("match:countdown", { seconds: 3 });
+  io.to(guestSocketId).emit("match:countdown", { seconds: 3 });
   return { ok: true };
 }
 
