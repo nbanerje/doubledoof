@@ -17,6 +17,31 @@ const io = new Server(server, {
 });
 
 const PORT = process.env.PORT || 3000;
+const CHARGE_THRESHOLD_MS = 0;
+/** Quick tap under this = melee (single attack key online); longer = charge shot */
+const MELEE_QUICK_TAP_MS = 150;
+const ROUND_INTERMISSION_MS = 4000;
+const MAX_CHARGE_MS = 12000;
+const CHARGE_SCALE_MS = 3200;
+const MELEE_RANGE = 48;
+const ORB_DAMAGE_MIN = 6;
+const ORB_DAMAGE_RANGE = 26;
+const VIEW_W = 1040;
+const FLOOR_Y = 560;
+const PLAYER_BODY_W = 36;
+const PLAYER_BODY_H = 48;
+const PLAYER_TOP_Y = FLOOR_Y - PLAYER_BODY_H;
+
+function chargedShotFromHeldMs(heldMs) {
+  const effective = Math.max(0, Math.min(heldMs - CHARGE_THRESHOLD_MS, CHARGE_SCALE_MS));
+  const ratio = CHARGE_SCALE_MS > 0 ? effective / CHARGE_SCALE_MS : 0;
+  const curved = ratio ** 0.88;
+  const damage = Math.round(ORB_DAMAGE_MIN + ORB_DAMAGE_RANGE * curved);
+  const w = 9 + Math.round(20 * curved);
+  const h = 4 + Math.round(11 * curved);
+  const speed = 9 + 4 * curved;
+  return { damage, w, h, speed };
+}
 const DB_URL = process.env.DB_URL;
 if (!DB_URL) {
   throw new Error("Missing DB_URL in .env");
@@ -259,7 +284,8 @@ function newMatch(playerA, playerB) {
       facing: 1,
       score: 0,
       controls: {},
-      fireCooldown: 0,
+      charging: false,
+      chargeStart: 0,
       color: "#2f7dff",
     },
     {
@@ -272,7 +298,8 @@ function newMatch(playerA, playerB) {
       facing: -1,
       score: 0,
       controls: {},
-      fireCooldown: 0,
+      charging: false,
+      chargeStart: 0,
       color: "#e44b4b",
     },
   ];
@@ -282,6 +309,7 @@ function newMatch(playerA, playerB) {
     players,
     projectiles: [],
     lockUntil: 0,
+    intermissionStartedAt: 0,
   });
   io.to(playerA.socketId).emit("match:start", { roomId, playerIndex: 0 });
   io.to(playerB.socketId).emit("match:start", { roomId, playerIndex: 1 });
@@ -303,21 +331,7 @@ function updateRoom(room) {
       p.vx = 4;
       p.facing = 1;
     }
-    p.x = Math.max(0, Math.min(994, p.x + p.vx));
-    p.fireCooldown = Math.max(0, p.fireCooldown - 1);
-    if (p.controls.attack && p.fireCooldown <= 0) {
-      const shooterIdx = room.players[0].id === p.id ? 0 : 1;
-      room.projectiles.push({
-        x: p.x + 20,
-        y: 540,
-        w: 18,
-        h: 8,
-        vx: p.facing * 9,
-        damage: 10,
-        targetIdx: shooterIdx === 0 ? 1 : 0,
-      });
-      p.fireCooldown = 5;
-    }
+    p.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, p.x + p.vx));
   }
 
   const p0 = room.players[0];
@@ -327,10 +341,10 @@ function updateRoom(room) {
     shot.x += shot.vx;
     const target = room.players[shot.targetIdx];
     const hit =
-      shot.x < target.x + 46 &&
+      shot.x < target.x + PLAYER_BODY_W &&
       shot.x + shot.w > target.x &&
-      shot.y < 520 + 66 &&
-      shot.y + shot.h > 520;
+      shot.y < PLAYER_TOP_Y + PLAYER_BODY_H &&
+      shot.y + shot.h > PLAYER_TOP_Y;
     if (hit) {
       target.health = Math.max(0, target.health - shot.damage);
       shot.dead = true;
@@ -342,7 +356,8 @@ function updateRoom(room) {
   if (p0.health <= 0 || p1.health <= 0) {
     const winnerIdx = p0.health <= 0 ? 1 : 0;
     room.players[winnerIdx].score += 1;
-    room.lockUntil = Date.now() + 1300;
+    room.intermissionStartedAt = Date.now();
+    room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
     room.round += 1;
     if (room.round > 10) {
       room.round = 1;
@@ -355,6 +370,10 @@ function updateRoom(room) {
     p0.x = 220;
     p1.x = 760;
     room.projectiles = [];
+    room.players.forEach((p) => {
+      p.charging = false;
+      p.chargeStart = 0;
+    });
   }
 }
 
@@ -372,6 +391,8 @@ setInterval(() => {
         color: p.color,
       })),
       projectiles: room.projectiles,
+      lockUntil: room.lockUntil,
+      intermissionStartedAt: room.intermissionStartedAt,
     });
   }
 }, 1000 / 30);
@@ -406,9 +427,38 @@ io.on("connection", (socket) => {
     if (!room) return;
     const idx = room.players.findIndex((p) => p.socketId === socket.id);
     const player = room.players[idx];
+    const enemy = room.players[idx === 0 ? 1 : 0];
     if (!player) return;
 
     player.controls = payload.controls || {};
+    if (payload.action === "chargeStart") {
+      player.charging = true;
+      player.chargeStart = Date.now();
+    }
+    if (payload.action === "chargeRelease" && player.charging) {
+      const heldMs = Date.now() - player.chargeStart;
+      if (heldMs < MELEE_QUICK_TAP_MS) {
+        const inRange = Math.abs(player.x - enemy.x) <= MELEE_RANGE;
+        const facingToward = (enemy.x - player.x) * player.facing > 0;
+        if (inRange && facingToward) {
+          enemy.health = Math.max(0, enemy.health - 10);
+        }
+      } else {
+        const cappedMs = Math.min(heldMs, MAX_CHARGE_MS);
+        const shot = chargedShotFromHeldMs(cappedMs);
+        const centerY = 544;
+        room.projectiles.push({
+          x: player.x + 20,
+          y: centerY - shot.h / 2,
+          w: shot.w,
+          h: shot.h,
+          vx: player.facing * shot.speed,
+          damage: shot.damage,
+          targetIdx: idx === 0 ? 1 : 0,
+        });
+      }
+      player.charging = false;
+    }
   });
 
   socket.on("match:join", ({ roomId }) => {

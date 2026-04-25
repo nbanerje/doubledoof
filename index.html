@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bat Duel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -11,12 +17,26 @@
       <section class="game-wrap">
         <button id="settingsToggleBtn" class="settings-toggle" type="button" aria-label="Open settings" title="Settings">⚙</button>
         <canvas id="gameCanvas" width="1040" height="620"></canvas>
+        <div id="buffPickOverlay" class="buff-pick-overlay hidden" role="dialog" aria-modal="true">
+          <div class="buff-pick-shell">
+            <h3 id="buffPickTitle">Pick a comeback buff</h3>
+            <p id="buffPickSub">Wait 2 seconds without clicking — then choose your buff.</p>
+            <div class="buff-pick-stage">
+              <div id="buffPickGateBlock" class="buff-pick-gate hidden" aria-live="polite">
+                <p class="buff-pick-gate-title">Stop clicking</p>
+                <p class="buff-pick-gate-sub">Buff choices unlock in 2 seconds.</p>
+              </div>
+              <div class="buff-pick-buttons" id="buffPickButtons"></div>
+            </div>
+          </div>
+        </div>
         <div id="roundBanner" class="round-banner hidden"></div>
         <div id="arcadeOverlay" class="arcade-overlay">
-          <div class="arcade-card">
+          <div id="arcadeCard" class="arcade-card">
             <p id="arcadeStepLabel" class="arcade-step">Step 1 of 4</p>
             <h2 id="arcadeTitle">Welcome to Bat Duel</h2>
             <p id="arcadeText">Arcade flow: pick mode, sign in if online, then start the match.</p>
+            <div id="arcadeExtra" class="arcade-extra" aria-live="polite"></div>
             <div id="arcadeActions" class="arcade-actions"></div>
           </div>
         </div>
@@ -60,8 +80,8 @@
         </div>
         <small id="matchStatus">Offline mode.</small>
         <p class="keys">
-          Player 1 (Blue): WASD (W jump/double-jump, S bat/charge shot)<br />
-          Player 2 (Red): Arrow keys (Up jump/double-jump, Down bat/charge shot)
+          After choosing a mode, each player can remap move, jump, melee, and charge (shoot) keys. Bindings save in this browser.<br />
+          Local: P2 defaults to Comma (melee) and Down (charge). After a round, wait 2s then the loser picks a buff. Charge orb has no hold delay, builds faster, and slows your fall while airborne. Online: quick tap still melees; hold charges faster.
         </p>
       </aside>
     </main>

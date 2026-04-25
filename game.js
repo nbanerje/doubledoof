@@ -1,13 +1,964 @@
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
+/** View (DOM) size — game logic and layout stay in this space. */
+const VIEW_W = 1040;
+const VIEW_H = 620;
+/** Internal pixel buffer — nearest-neighbor scaled to canvas for chunky pixels. */
+const GAME_W = 520;
+const GAME_H = 310;
+const viewCanvas = document.getElementById("gameCanvas");
+const gameCanvas = document.createElement("canvas");
+gameCanvas.width = GAME_W;
+gameCanvas.height = GAME_H;
+const ctx = gameCanvas.getContext("2d");
+const viewCtx = viewCanvas.getContext("2d");
+
+function beginPixelGameFrame() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, GAME_W, GAME_H);
+  ctx.imageSmoothingEnabled = false;
+  ctx.setTransform(GAME_W / VIEW_W, 0, 0, GAME_H / VIEW_H, 0, 0);
+}
+
+function endPixelGameFrame() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const vw = viewCanvas.width || VIEW_W;
+  const vh = viewCanvas.height || VIEW_H;
+  viewCtx.clearRect(0, 0, vw, vh);
+  viewCtx.imageSmoothingEnabled = false;
+  viewCtx.drawImage(gameCanvas, 0, 0, GAME_W, GAME_H, 0, 0, vw, vh);
+}
+
+function hudStrokeFillText(vc, text, x, y, fillStyle) {
+  vc.lineJoin = "round";
+  vc.miterLimit = 2;
+  vc.lineWidth = 4;
+  vc.strokeStyle = "rgba(6,8,16,0.92)";
+  vc.strokeText(text, x, y);
+  vc.fillStyle = fillStyle;
+  vc.fillText(text, x, y);
+}
+
+function drawHealthBarHud(vc, x, y, hp, color, label, maxHp = DEFAULT_MAX_HP) {
+  const cap = Math.max(1, maxHp);
+  const bw = 260;
+  const bh = 34;
+  vc.save();
+  vc.imageSmoothingEnabled = true;
+  vc.fillStyle = "rgba(6,8,16,0.88)";
+  vc.beginPath();
+  vc.roundRect(x - 3, y - 3, bw + 6, bh + 6, 8);
+  vc.fill();
+  vc.fillStyle = "#141820";
+  vc.beginPath();
+  vc.roundRect(x, y, bw, bh, 6);
+  vc.fill();
+  vc.strokeStyle = "rgba(180,195,230,0.55)";
+  vc.lineWidth = 2;
+  vc.stroke();
+  const innerMax = bw - 16;
+  const innerW = Math.max(0, (hp / cap) * innerMax);
+  vc.fillStyle = color;
+  vc.beginPath();
+  vc.roundRect(x + 8, y + 8, innerW, bh - 16, 4);
+  vc.fill();
+  vc.font = HUD_FONT_MAIN;
+  vc.textAlign = "left";
+  vc.textBaseline = "bottom";
+  hudStrokeFillText(vc, `${label}  ${Math.round(hp)} / ${cap}`, x + 10, y + bh - 7, "#f4f7ff");
+  vc.restore();
+}
+
+function drawOrbAmmoBarHud(vc, x, y, p, color, shortLabel) {
+  const ammo = playerOrbAmmoDisplay(p);
+  if (ammo === null) return;
+  const max = ORB_AMMO_PER_ROUND;
+  const bw = 260;
+  const bh = 14;
+  const padBottom = 22;
+  vc.save();
+  vc.imageSmoothingEnabled = true;
+  vc.fillStyle = "rgba(6,8,16,0.88)";
+  vc.beginPath();
+  vc.roundRect(x - 3, y - 3, bw + 6, bh + padBottom + 6, 8);
+  vc.fill();
+  vc.fillStyle = "#161c28";
+  vc.beginPath();
+  vc.roundRect(x, y, bw, bh, 5);
+  vc.fill();
+  vc.strokeStyle = ammo <= 0 ? "rgba(200,90,90,0.75)" : "rgba(120,145,200,0.65)";
+  vc.lineWidth = 2;
+  vc.stroke();
+  const inner = bw - 12;
+  const cellW = inner / max;
+  for (let i = 0; i < max; i += 1) {
+    const filled = i < ammo;
+    const cx = x + 6 + i * cellW;
+    const cw = Math.max(2, cellW - 2);
+    vc.fillStyle = filled ? color : "#2a3348";
+    vc.beginPath();
+    vc.roundRect(cx, y + 4, cw, bh - 8, 3);
+    vc.fill();
+    if (filled) {
+      vc.fillStyle = "rgba(255,255,255,0.28)";
+      vc.fillRect(cx, y + 4, cw, 3);
+    }
+  }
+  vc.font = HUD_FONT_SMALL;
+  vc.textAlign = "left";
+  vc.textBaseline = "top";
+  const sub = ammo <= 0 ? "#ffb4b0" : "#dce6ff";
+  hudStrokeFillText(vc, `${shortLabel} orbs  ${ammo} / ${max}`, x + 8, y + bh + 6, sub);
+  vc.restore();
+}
+
+function drawRoundIntermissionHud(vc) {
+  if (localState.buffPickActive) return;
+  const now = Date.now();
+  let start = 0;
+  let end = 0;
+  if (mode === "online") {
+    start = localState.intermissionStartedAt || 0;
+    end = localState.lockUntil || 0;
+  } else {
+    start = roundIntermissionStartAt;
+    end = roundLockUntil;
+  }
+  if (start <= 0 || now >= end) return;
+  const elapsed = now - start;
+  const tick = Math.floor(elapsed / 1000);
+  let label = null;
+  if (tick < 3) label = String(3 - tick);
+  else if (tick < 4) label = "GO!";
+  if (label == null) return;
+  vc.save();
+  vc.imageSmoothingEnabled = true;
+  vc.fillStyle = "rgba(8,10,20,0.68)";
+  vc.fillRect(0, 0, VIEW_W, VIEW_H);
+  vc.textAlign = "center";
+  vc.textBaseline = "middle";
+  vc.font = '800 96px "DM Sans", system-ui, sans-serif';
+  vc.lineWidth = 6;
+  vc.strokeStyle = "rgba(6,8,18,0.95)";
+  vc.strokeText(label, VIEW_W / 2, VIEW_H / 2 - 24);
+  vc.fillStyle = "#fde047";
+  vc.fillText(label, VIEW_W / 2, VIEW_H / 2 - 24);
+  vc.restore();
+}
+
+function drawHudOnView() {
+  if (!overlayEl.classList.contains("hidden")) return;
+  const vw = viewCanvas.width || VIEW_W;
+  const vh = viewCanvas.height || VIEW_H;
+  const vc = viewCtx;
+  vc.save();
+  vc.setTransform(vw / VIEW_W, 0, 0, vh / VIEW_H, 0, 0);
+  vc.imageSmoothingEnabled = true;
+  const p0 = localState.players[0];
+  const p1 = localState.players[1];
+  drawHealthBarHud(vc, 18, 12, p0.health, p0.color, `Blue · ${p0.score} wins`, playerMaxHp(p0));
+  drawOrbAmmoBarHud(vc, 18, 52, p0, p0.color, "Blue");
+  drawHealthBarHud(vc, VIEW_W - 278, 12, p1.health, p1.color, `Red · ${p1.score} wins`, playerMaxHp(p1));
+  drawOrbAmmoBarHud(vc, VIEW_W - 278, 52, p1, p1.color, "Red");
+  const lvl = currentLevel();
+  vc.textAlign = "center";
+  vc.textBaseline = "alphabetic";
+  vc.font = HUD_FONT_TITLE;
+  hudStrokeFillText(
+    vc,
+    `Round ${localState.round} / 10  ·  ${lvl.name}`,
+    VIEW_W / 2,
+    28,
+    "#f4f7ff"
+  );
+  vc.font = HUD_FONT_SMALL;
+  hudStrokeFillText(vc, `Wins  Blue ${p0.score}  ·  Red ${p1.score}`, VIEW_W / 2, 50, "rgba(228,235,255,0.95)");
+  vc.textAlign = "left";
+  if (overlayEl.classList.contains("hidden") && !localState.buffPickActive) {
+    drawRoundIntermissionHud(vc);
+  }
+  vc.restore();
+}
+
+const arcadeExtraEl = document.getElementById("arcadeExtra");
 const FLOOR_Y = 560;
+/** Axis-aligned body: `p.x` left, `p.y` top; feet sit on `plat.y` / `FLOOR_Y`. Matches draw anchor (feet ≈ translateY + 37). */
+const PLAYER_BODY_W = 36;
+const PLAYER_BODY_H = 48;
 const keys = new Set();
 const keyTimes = new Map();
 const authTokenKey = "bat-duel-token";
 const MOVE_SPEED = 4;
+/** Horizontal velocity eases toward input each frame (reduces jitter / stair-stepping). */
+const MOVE_ACCEL = 0.4;
+/** Extra braking when input is neutral so fighters fully stop (no residual drift). */
+const MOVE_STOP_ACCEL = 0.62;
+const MOVE_VX_SNAP = 0.035;
+
+/** HUD is drawn on the view canvas with smoothing (readable UI over pixel game). */
+const HUD_FONT_MAIN = '600 15px "DM Sans", system-ui, sans-serif';
+const HUD_FONT_SMALL = '500 13px "DM Sans", system-ui, sans-serif';
+const HUD_FONT_TITLE = '600 17px "DM Sans", system-ui, sans-serif';
 const GRAVITY = 0.7;
+/** While charging in the air, gravity is multiplied by this (lower = floatier). */
+const CHARGE_AIR_GRAVITY_MULT = 0.26;
 const JUMP_VELOCITY = -12.5;
-const GAME_KEYS = new Set(["KeyA", "KeyD", "KeyW", "KeyS", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
+/** No minimum hold before orb appears; shot power scales from first frame of hold. */
+const CHARGE_THRESHOLD_MS = 0;
+/** Between-round intermission: 3-2-1 + GO + brief pause before fighters move again */
+const ROUND_INTERMISSION_MS = 4000;
+const MAX_CHARGE_MS = 12000;
+/** Shorter scale = max charge reached faster */
+const CHARGE_SCALE_MS = 3200;
+/** Buff cards / keys ignore input until this many ms after the overlay opens */
+const BUFF_PICK_GATE_MS = 2000;
+/** All buffs in the pool; each pick shows 3 different cards chosen at random. */
+const BUFF_POOL = [
+  "triple",
+  "tank",
+  "power",
+  "infiniteJumps",
+  "infiniteAmmo",
+  "instantMaxCharge",
+  "meleeLong",
+];
+const BUFF_DEFS = {
+  triple: { name: "Triple shot", desc: "Each charged release fires 3 orbs" },
+  tank: { name: "Tank", desc: "+30 max HP for the match" },
+  power: { name: "Power", desc: "+35% damage for the match" },
+  infiniteJumps: { name: "Sky", desc: "Unlimited mid-air jumps" },
+  infiniteAmmo: { name: "Bottomless", desc: "Infinite orb ammo" },
+  instantMaxCharge: { name: "Overcharge", desc: "Shots are always full tier V" },
+  meleeLong: { name: "Duelist", desc: "Melee range and swing 2× longer" },
+};
+
+function shuffleInPlace(a) {
+  for (let i = a.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = a[i];
+    a[i] = a[j];
+    a[j] = t;
+  }
+  return a;
+}
+
+/**
+ * Picks 3 random distinct buffs. After the first buff intermission, avoids the same 3
+ * (as a set) as the previous one so the line-up “switches up.”
+ */
+function pickRandomBuffTriplet() {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const pool = shuffleInPlace([...BUFF_POOL]);
+    const t = [pool[0], pool[1], pool[2]];
+    const key = [...t].sort().join("|");
+    if (!localState.buffLastOfferedKey || key !== localState.buffLastOfferedKey) {
+      return { triplet: t, key };
+    }
+  }
+  const pool = shuffleInPlace([...BUFF_POOL]);
+  const t = [pool[0], pool[1], pool[2]];
+  return { triplet: t, key: [...t].sort().join("|") };
+}
+const SWING_DURATION_MS = 200;
+/** Bat swing reach (shorter than before) */
+const MELEE_RANGE = 48;
+/** Horizontal push on defender when melee connects */
+const MELEE_KNOCKBACK_VX = 16;
+const DEFAULT_MAX_HP = 100;
+const TANK_BUFF_MAX_HP = 130;
+/** Charged orb damage = `ORB_DAMAGE_MIN + ORB_DAMAGE_RANGE * chargeCurve` (before power buff). */
+const ORB_DAMAGE_MIN = 6;
+const ORB_DAMAGE_RANGE = 26;
+/** Charged shots per fighter per round (each projectile counts; triple uses 3). */
+const ORB_AMMO_PER_ROUND = 10;
+const POWER_BUFF_DAMAGE_MULT = 1.35;
+const BINDINGS_STORAGE_KEY = "bat-duel-bindings-v1";
+
+const PERCIVAL_IDLE_URL = "./assets/percival-idle.png";
+const PERCIVAL_RUN_URLS = [
+  "./assets/percival-run-1.png",
+  "./assets/percival-run-2.png",
+  "./assets/percival-run-3.png",
+  "./assets/percival-run-4.png",
+];
+const PERCIVAL_HIT_URL = "./assets/percival-hit.png";
+const GUY2_IDLE_URL = "./assets/guy2-idle.png";
+const GUY2_RUN_URLS = [
+  "./assets/guy2-run-1.png",
+  "./assets/guy2-run-2.png",
+  "./assets/guy2-run-3.png",
+  "./assets/guy2-run-4.png",
+];
+const GUY2_HIT_URL = "./assets/guy2-hit.png";
+const MELEE_SWORD_URL = "./assets/melee-sword.png";
+const percivalIdleImage = new Image();
+const meleeSwordImage = new Image();
+const percivalHitImage = new Image();
+const guy2IdleImage = new Image();
+const guy2HitImage = new Image();
+const percivalRunImages = PERCIVAL_RUN_URLS.map(() => new Image());
+const guy2RunImages = GUY2_RUN_URLS.map(() => new Image());
+/** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
+let percivalIdleBlit = null;
+/** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
+let percivalHitBlit = null;
+/** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
+let guy2IdleBlit = null;
+/** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
+let guy2HitBlit = null;
+/**
+ * Four run blits in order: 1 → 2 → 3 → 4 → loop (each file is keyed + cropped to the knight).
+ * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
+ */
+let percivalRun = null;
+/**
+ * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
+ */
+let guy2Run = null;
+/** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
+let meleeSwordBlit = null;
+
+function globalAlphaBbox(d, iw, ih) {
+  let minX = iw;
+  let minY = ih;
+  let maxX = 0;
+  let maxY = 0;
+  for (let y = 0; y < ih; y += 1) {
+    for (let x = 0; x < iw; x += 1) {
+      if (d[(y * iw + x) * 4 + 3] > 28) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (minX > maxX) return null;
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Key plate to canvas: purple out + bottom text strip; returns canvas + imagedata.
+ */
+function keyPercivalToCanvas(img) {
+  const iw = img.naturalWidth;
+  const ih = img.naturalHeight;
+  if (!iw || !ih) return null;
+  const c = document.createElement("canvas");
+  c.width = iw;
+  c.height = ih;
+  const c2 = c.getContext("2d", { willReadFrequently: true });
+  if (!c2) return null;
+  c2.imageSmoothingEnabled = false;
+  c2.drawImage(img, 0, 0);
+  const im = c2.getImageData(0, 0, iw, ih);
+  const d = im.data;
+  const c00 = 0;
+  const c10 = (iw - 1) * 4;
+  const c01 = (ih - 1) * iw * 4;
+  const c11 = ((ih - 1) * iw + (iw - 1)) * 4;
+  const br = (d[c00] + d[c10] + d[c01] + d[c11]) / 4;
+  const bg = (d[c00 + 1] + d[c10 + 1] + d[c01 + 1] + d[c11 + 1]) / 4;
+  const bb = (d[c00 + 2] + d[c10 + 2] + d[c01 + 2] + d[c11 + 2]) / 4;
+  const thresh = 70 * 70;
+  const textBandY = Math.floor(ih * 0.74);
+  for (let p = 0; p < d.length; p += 4) {
+    const y = (p / 4 / iw) | 0;
+    const r = d[p] - br;
+    const g = d[p + 1] - bg;
+    const b = d[p + 2] - bb;
+    if (r * r + g * g + b * b < thresh) {
+      d[p + 3] = 0;
+    } else if (y >= textBandY && d[p] + d[p + 1] + d[p + 2] > 650) {
+      d[p + 3] = 0;
+    }
+  }
+  c2.putImageData(im, 0, 0);
+  return { canvas: c, d, iw, ih };
+}
+
+/** Single idle: tight crop. */
+function buildPercivalIdleBlit(img) {
+  const k = keyPercivalToCanvas(img);
+  if (!k) return null;
+  const { canvas, d, iw, ih } = k;
+  const bb = globalAlphaBbox(d, iw, ih);
+  if (!bb) return null;
+  return {
+    canvas,
+    cx: bb.minX,
+    cy: bb.minY,
+    cw: bb.maxX - bb.minX + 1,
+    ch: bb.maxY - bb.minY + 1,
+  };
+}
+
+function initPercivalIdleBlit() {
+  if (!percivalIdleImage.naturalWidth) return;
+  percivalIdleBlit = buildPercivalIdleBlit(percivalIdleImage);
+}
+percivalIdleImage.onload = initPercivalIdleBlit;
+percivalIdleImage.src = PERCIVAL_IDLE_URL;
+if (percivalIdleImage.complete) initPercivalIdleBlit();
+
+function initPercivalHitBlit() {
+  if (!percivalHitImage.naturalWidth) return;
+  percivalHitBlit = buildPercivalIdleBlit(percivalHitImage);
+}
+percivalHitImage.onload = initPercivalHitBlit;
+percivalHitImage.src = PERCIVAL_HIT_URL;
+if (percivalHitImage.complete) initPercivalHitBlit();
+
+function initGuy2IdleBlit() {
+  if (!guy2IdleImage.naturalWidth) return;
+  guy2IdleBlit = buildPercivalIdleBlit(guy2IdleImage);
+}
+guy2IdleImage.onload = initGuy2IdleBlit;
+guy2IdleImage.src = GUY2_IDLE_URL;
+if (guy2IdleImage.complete) initGuy2IdleBlit();
+
+function initGuy2HitBlit() {
+  if (!guy2HitImage.naturalWidth) return;
+  guy2HitBlit = buildPercivalIdleBlit(guy2HitImage);
+}
+guy2HitImage.onload = initGuy2HitBlit;
+guy2HitImage.src = GUY2_HIT_URL;
+if (guy2HitImage.complete) initGuy2HitBlit();
+
+function initMeleeSwordBlit() {
+  if (!meleeSwordImage.naturalWidth) return;
+  meleeSwordBlit = buildPercivalIdleBlit(meleeSwordImage);
+}
+meleeSwordImage.onload = initMeleeSwordBlit;
+meleeSwordImage.src = MELEE_SWORD_URL;
+if (meleeSwordImage.complete) initMeleeSwordBlit();
+
+function tryInitGuy2Run() {
+  for (let i = 0; i < guy2RunImages.length; i += 1) {
+    const im = guy2RunImages[i];
+    if (!im.complete || !im.naturalWidth) return;
+  }
+  const frames = [];
+  for (let i = 0; i < guy2RunImages.length; i += 1) {
+    const b = buildPercivalIdleBlit(guy2RunImages[i]);
+    if (!b) return;
+    frames.push(b);
+  }
+  guy2Run = { frames };
+}
+for (let i = 0; i < guy2RunImages.length; i += 1) {
+  guy2RunImages[i].onload = tryInitGuy2Run;
+  guy2RunImages[i].src = GUY2_RUN_URLS[i];
+  if (guy2RunImages[i].complete) tryInitGuy2Run();
+}
+
+function tryInitPercivalRun() {
+  for (let i = 0; i < percivalRunImages.length; i += 1) {
+    const im = percivalRunImages[i];
+    if (!im.complete || !im.naturalWidth) return;
+  }
+  const frames = [];
+  for (let i = 0; i < percivalRunImages.length; i += 1) {
+    const b = buildPercivalIdleBlit(percivalRunImages[i]);
+    if (!b) return;
+    frames.push(b);
+  }
+  percivalRun = { frames };
+}
+for (let i = 0; i < percivalRunImages.length; i += 1) {
+  percivalRunImages[i].onload = tryInitPercivalRun;
+  percivalRunImages[i].src = PERCIVAL_RUN_URLS[i];
+  if (percivalRunImages[i].complete) tryInitPercivalRun();
+}
+
+function defaultKeyBindings() {
+  return {
+    p0: {
+      left: "KeyA",
+      right: "KeyD",
+      jump: "KeyW",
+      melee: "Space",
+      charge: "KeyS",
+      attack: "KeyS",
+    },
+    p1: {
+      left: "ArrowLeft",
+      right: "ArrowRight",
+      jump: "ArrowUp",
+      melee: "Comma",
+      charge: "ArrowDown",
+      attack: "ArrowDown",
+    },
+    online: {
+      left: "KeyA",
+      right: "KeyD",
+      jump: "KeyW",
+      attack: "KeyS",
+    },
+  };
+}
+
+let keyBindings = defaultKeyBindings();
+
+function loadKeyBindings() {
+  try {
+    const raw = localStorage.getItem(BINDINGS_STORAGE_KEY);
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    const def = defaultKeyBindings();
+    keyBindings = {
+      ...def,
+      p0: { ...def.p0, ...(o.p0 || {}) },
+      p1: { ...def.p1, ...(o.p1 || {}) },
+      online: { ...def.online, ...(o.online || {}) },
+    };
+    if (!keyBindings.p1.melee) keyBindings.p1.melee = def.p1.melee;
+    if (!keyBindings.p1.charge) keyBindings.p1.charge = def.p1.charge;
+    keyBindings.p0.attack = keyBindings.p0.charge;
+    keyBindings.p1.attack = keyBindings.p1.charge;
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function saveKeyBindings() {
+  try {
+    localStorage.setItem(BINDINGS_STORAGE_KEY, JSON.stringify(keyBindings));
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function bindingCodesFlat() {
+  const s = new Set();
+  const add = (c) => {
+    if (typeof c === "string" && c.length) s.add(c);
+  };
+  const { p0, p1, online } = keyBindings;
+  add(p0.left);
+  add(p0.right);
+  add(p0.jump);
+  add(p0.melee);
+  add(p0.charge);
+  add(p0.attack);
+  add(p1.left);
+  add(p1.right);
+  add(p1.jump);
+  add(p1.melee);
+  add(p1.charge);
+  add(p1.attack);
+  add(online.left);
+  add(online.right);
+  add(online.jump);
+  add(online.attack);
+  return s;
+}
+
+function shouldPreventGameKey(code) {
+  return bindingCodesFlat().has(code);
+}
+
+function p0FireKey() {
+  return keyBindings.p0.charge;
+}
+
+function p1FireKey() {
+  return keyBindings.p1.charge;
+}
+
+function onlineK() {
+  return keyBindings.online;
+}
+
+let remapState = {
+  active: false,
+  /** @type {"p0"|"p1"|"online"|""} */
+  target: "",
+  fields: [],
+  i: 0,
+  temp: {},
+};
+
+function clearArcadeExtra() {
+  if (arcadeExtraEl) arcadeExtraEl.innerHTML = "";
+}
+
+function formatKeyLabel(code) {
+  if (!code) return "?";
+  if (code === "Space") return "Space";
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Arrow")) return code.replace("Arrow", "");
+  return code;
+}
+
+function describeBindings(playerIdx) {
+  if (playerIdx === 0) {
+    const b = keyBindings.p0;
+    return `Move <kbd>${formatKeyLabel(b.left)}</kbd> / <kbd>${formatKeyLabel(b.right)}</kbd>, jump <kbd>${formatKeyLabel(b.jump)}</kbd>, melee <kbd>${formatKeyLabel(b.melee)}</kbd>, charge <kbd>${formatKeyLabel(b.charge)}</kbd>`;
+  }
+  const b = keyBindings.p1;
+  return `Move <kbd>${formatKeyLabel(b.left)}</kbd> / <kbd>${formatKeyLabel(b.right)}</kbd>, jump <kbd>${formatKeyLabel(b.jump)}</kbd>, melee <kbd>${formatKeyLabel(b.melee)}</kbd>, charge <kbd>${formatKeyLabel(b.charge)}</kbd>`;
+}
+
+function describeOnlineBindings() {
+  const b = keyBindings.online;
+  return `Move <kbd>${formatKeyLabel(b.left)}</kbd> / <kbd>${formatKeyLabel(b.right)}</kbd>, jump <kbd>${formatKeyLabel(b.jump)}</kbd>, attack <kbd>${formatKeyLabel(b.attack)}</kbd> (tap / hold + release)`;
+}
+
+function wizardFieldsForPlayer() {
+  return [
+    { id: "left", label: "Move left" },
+    { id: "right", label: "Move right" },
+    { id: "jump", label: "Jump" },
+    { id: "melee", label: "Melee (sword / bat swing)" },
+    { id: "charge", label: "Charge shot (hold for orb, release to fire)" },
+  ];
+}
+
+function wizardFieldsOnline() {
+  return [
+    { id: "left", label: "Move left" },
+    { id: "right", label: "Move right" },
+    { id: "jump", label: "Jump" },
+    { id: "attack", label: "Melee tap / hold to charge, release to shoot" },
+  ];
+}
+
+function teardownRemapWizard() {
+  if (!remapState.active) return;
+  remapState.active = false;
+  remapState.target = "";
+  window.removeEventListener("keydown", onRemapKeydown, true);
+}
+
+function collectOtherPlayerCodes(target) {
+  if (target === "online") return new Set();
+  const used = new Set();
+  const add = (c) => {
+    if (typeof c === "string" && c.length) used.add(c);
+  };
+  if (target === "p0") {
+    const o = keyBindings.p1;
+    add(o.left);
+    add(o.right);
+    add(o.jump);
+    add(o.melee);
+    add(o.charge);
+    add(o.attack);
+  } else if (target === "p1") {
+    const o = keyBindings.p0;
+    add(o.left);
+    add(o.right);
+    add(o.jump);
+    add(o.melee);
+    add(o.charge);
+    add(o.attack);
+  }
+  return used;
+}
+
+function showRemapPrompt() {
+  if (!arcadeExtraEl) return;
+  const f = remapState.fields[remapState.i];
+  arcadeExtraEl.innerHTML = `<p class="bind-hint">Press a key</p><p><strong>${f.label}</strong></p><p class="bind-muted">Esc — cancel this mapping</p>`;
+}
+
+function onRemapKeydown(e) {
+  if (!remapState.active) return;
+  if (e.repeat) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const backTarget = remapState.target;
+  if (e.code === "Escape") {
+    teardownRemapWizard();
+    if (backTarget === "p0") setArcadeStep("controls_p1");
+    else if (backTarget === "p1") setArcadeStep("controls_p2");
+    else if (backTarget === "online") setArcadeStep("controls_online");
+    return;
+  }
+  const blocked = new Set([
+    "Tab",
+    "F5",
+    "F11",
+    "F12",
+    "MetaLeft",
+    "MetaRight",
+    "ContextMenu",
+    "CapsLock",
+  ]);
+  if (blocked.has(e.code)) return;
+  const field = remapState.fields[remapState.i];
+  const used = new Set([...Object.values(remapState.temp), ...collectOtherPlayerCodes(remapState.target)]);
+  if (used.has(e.code)) {
+    arcadeExtraEl.innerHTML = `<p class="bind-hint">That key is already used</p><p><strong>${field.label}</strong></p><p class="bind-muted">Try a different key · Esc to cancel</p>`;
+    return;
+  }
+  remapState.temp[field.id] = e.code;
+  remapState.i += 1;
+  if (remapState.i >= remapState.fields.length) {
+    commitRemap();
+    return;
+  }
+  showRemapPrompt();
+}
+
+function commitRemap() {
+  const t = remapState.target;
+  if (t === "online") {
+    keyBindings.online = { ...keyBindings.online, ...remapState.temp };
+  } else if (t === "p0") {
+    const next = { ...keyBindings.p0, ...remapState.temp };
+    next.attack = next.charge;
+    keyBindings.p0 = next;
+  } else if (t === "p1") {
+    const next = { ...keyBindings.p1, ...remapState.temp };
+    next.attack = next.charge;
+    keyBindings.p1 = next;
+  }
+  saveKeyBindings();
+  teardownRemapWizard();
+  clearArcadeExtra();
+  arcadeTextEl.textContent = "Launch this round now.";
+  if (t === "online") {
+    setArcadeStep("ready");
+    return;
+  }
+  if (t === "p0") {
+    if (mode === "multi") setArcadeStep("controls_p2");
+    else setArcadeStep("ready");
+    return;
+  }
+  setArcadeStep("ready");
+}
+
+function startRemapWizard(playerIdx) {
+  teardownRemapWizard();
+  remapState.active = true;
+  remapState.target = playerIdx === 0 ? "p0" : "p1";
+  remapState.fields = wizardFieldsForPlayer();
+  remapState.i = 0;
+  remapState.temp = {};
+  arcadeStep = "remap";
+  stepLabelEl.textContent = "Control setup";
+  arcadeTitleEl.textContent = playerIdx === 0 ? "Player 1 — set keys" : "Player 2 — set keys";
+  arcadeTextEl.textContent = "";
+  arcadeActionsEl.innerHTML = "";
+  clearArcadeExtra();
+  overlayEl.classList.remove("hidden");
+  window.addEventListener("keydown", onRemapKeydown, true);
+  showRemapPrompt();
+}
+
+function startRemapWizardOnline() {
+  teardownRemapWizard();
+  remapState.active = true;
+  remapState.target = "online";
+  remapState.fields = wizardFieldsOnline();
+  remapState.i = 0;
+  remapState.temp = {};
+  arcadeStep = "remap";
+  stepLabelEl.textContent = "Control setup";
+  arcadeTitleEl.textContent = "Your keys (online)";
+  arcadeTextEl.textContent = "";
+  arcadeActionsEl.innerHTML = "";
+  clearArcadeExtra();
+  overlayEl.classList.remove("hidden");
+  window.addEventListener("keydown", onRemapKeydown, true);
+  showRemapPrompt();
+}
+
+function resetPlayerBindingsDefault(playerIdx) {
+  const d = defaultKeyBindings();
+  if (playerIdx === 0) keyBindings.p0 = { ...d.p0 };
+  else keyBindings.p1 = { ...d.p1 };
+  saveKeyBindings();
+}
+
+function resetOnlineBindingsDefault() {
+  const d = defaultKeyBindings();
+  keyBindings.online = { ...d.online };
+  saveKeyBindings();
+}
+
+function renderControlChoiceScreen(playerIdx) {
+  const name = playerIdx === 0 ? "Player 1 (Blue)" : "Player 2 (Red)";
+  stepLabelEl.textContent = "Control setup";
+  arcadeTitleEl.textContent = `${name}`;
+  arcadeTextEl.textContent =
+    "Before the round, choose the default layout or map your own keys. You will be asked to press one key for each action.";
+  arcadeActionsEl.innerHTML = "";
+  if (arcadeExtraEl) arcadeExtraEl.innerHTML = `<p class="arcade-bind-summary">${describeBindings(playerIdx)}</p>`;
+
+  const keep = document.createElement("button");
+  keep.type = "button";
+  keep.dataset.action = playerIdx === 0 ? "bind0_keep" : "bind1_keep";
+  keep.textContent = "Keep default";
+  arcadeActionsEl.appendChild(keep);
+
+  const map = document.createElement("button");
+  map.type = "button";
+  map.dataset.action = playerIdx === 0 ? "bind0_map" : "bind1_map";
+  map.textContent = "Create new mapping";
+  arcadeActionsEl.appendChild(map);
+
+  if (playerIdx === 1) {
+    const back = document.createElement("button");
+    back.type = "button";
+    back.dataset.action = "bind1_back";
+    back.textContent = "Back";
+    arcadeActionsEl.appendChild(back);
+  }
+
+  overlayEl.classList.remove("hidden");
+}
+
+function renderOnlineControlChoice() {
+  stepLabelEl.textContent = "Control setup";
+  arcadeTitleEl.textContent = "Your keys (online)";
+  arcadeTextEl.textContent =
+    "Map movement and attack before matchmaking. These keys apply whether you spawn on the left or right.";
+  arcadeActionsEl.innerHTML = "";
+  if (arcadeExtraEl) arcadeExtraEl.innerHTML = `<p class="arcade-bind-summary">${describeOnlineBindings()}</p>`;
+
+  const keep = document.createElement("button");
+  keep.type = "button";
+  keep.dataset.action = "online_bind_keep";
+  keep.textContent = "Keep default";
+  arcadeActionsEl.appendChild(keep);
+
+  const map = document.createElement("button");
+  map.type = "button";
+  map.dataset.action = "online_bind_map";
+  map.textContent = "Create new mapping";
+  arcadeActionsEl.appendChild(map);
+
+  overlayEl.classList.remove("hidden");
+}
+
+/** 10 rounds × distinct layout + sky theme (`sunny` uses bright daytime backdrops). */
+const LEVELS = [
+  {
+    name: "Neon Wharf",
+    bg: "night",
+    ground: "#30466f",
+    platforms: [
+      { x: 140, y: 490, w: 180, h: 14 },
+      { x: 420, y: 430, w: 210, h: 14 },
+      { x: 760, y: 500, w: 170, h: 14 },
+      { x: 620, y: 340, w: 150, h: 14 },
+    ],
+  },
+  {
+    name: "Sunrise Deck",
+    bg: "sunny",
+    ground: "#4a8f6a",
+    platforms: [
+      { x: 90, y: 485, w: 170, h: 14 },
+      { x: 360, y: 415, w: 220, h: 14 },
+      { x: 680, y: 495, w: 200, h: 14 },
+      { x: 540, y: 330, w: 160, h: 14 },
+    ],
+  },
+  {
+    name: "Violet Docks",
+    bg: "dusk",
+    ground: "#4a3f62",
+    platforms: [
+      { x: 120, y: 500, w: 200, h: 14 },
+      { x: 400, y: 445, w: 180, h: 14 },
+      { x: 720, y: 475, w: 175, h: 14 },
+      { x: 580, y: 355, w: 155, h: 14 },
+    ],
+  },
+  {
+    name: "Solar Yard",
+    bg: "sunny",
+    ground: "#5a9356",
+    platforms: [
+      { x: 160, y: 478, w: 150, h: 14 },
+      { x: 330, y: 380, w: 240, h: 14 },
+      { x: 640, y: 510, w: 190, h: 14 },
+      { x: 800, y: 420, w: 130, h: 14 },
+    ],
+  },
+  {
+    name: "Storm Pier",
+    bg: "storm",
+    ground: "#354c5c",
+    platforms: [
+      { x: 110, y: 492, w: 190, h: 14 },
+      { x: 380, y: 438, w: 200, h: 14 },
+      { x: 650, y: 488, w: 210, h: 14 },
+      { x: 500, y: 320, w: 170, h: 14 },
+    ],
+  },
+  {
+    name: "Aurora Span",
+    bg: "aurora",
+    ground: "#2f4d5c",
+    platforms: [
+      { x: 130, y: 505, w: 175, h: 14 },
+      { x: 410, y: 360, w: 165, h: 14 },
+      { x: 610, y: 455, w: 195, h: 14 },
+      { x: 780, y: 385, w: 145, h: 14 },
+    ],
+  },
+  {
+    name: "Brightline Roof",
+    bg: "sunny",
+    ground: "#6a9b78",
+    platforms: [
+      { x: 70, y: 470, w: 160, h: 14 },
+      { x: 280, y: 400, w: 260, h: 14 },
+      { x: 600, y: 500, w: 180, h: 14 },
+      { x: 850, y: 450, w: 120, h: 14 },
+    ],
+  },
+  {
+    name: "Midnight Run",
+    bg: "night",
+    ground: "#2a3a58",
+    platforms: [
+      { x: 150, y: 488, w: 165, h: 14 },
+      { x: 450, y: 425, w: 195, h: 14 },
+      { x: 740, y: 498, w: 165, h: 14 },
+      { x: 590, y: 348, w: 145, h: 14 },
+    ],
+  },
+  {
+    name: "Copper Haze",
+    bg: "dusk",
+    ground: "#5c4550",
+    platforms: [
+      { x: 100, y: 495, w: 185, h: 14 },
+      { x: 350, y: 430, w: 225, h: 14 },
+      { x: 670, y: 465, w: 185, h: 14 },
+      { x: 520, y: 365, w: 150, h: 14 },
+    ],
+  },
+  {
+    name: "Clear Skies Arena",
+    bg: "sunny",
+    ground: "#509068",
+    platforms: [
+      { x: 140, y: 500, w: 175, h: 14 },
+      { x: 400, y: 395, w: 200, h: 14 },
+      { x: 700, y: 505, w: 170, h: 14 },
+      { x: 560, y: 335, w: 155, h: 14 },
+    ],
+  },
+];
+
+function getLevelForRound(round) {
+  return LEVELS[(Math.max(1, round) - 1) % LEVELS.length];
+}
+
+function currentLevel() {
+  return getLevelForRound(localState.round);
+}
+
+function currentPlatforms() {
+  return currentLevel().platforms;
+}
 
 let mode = "single";
 let socket = null;
@@ -15,17 +966,86 @@ let roomId = null;
 let playerIndex = 0;
 let arcadeStep = "welcome";
 const visualState = [
-  { recoilUntil: 0, attackUntil: 0, charging: false, prevHealth: 100 },
-  { recoilUntil: 0, attackUntil: 0, charging: false, prevHealth: 100 },
+  {
+    recoilUntil: 0,
+    attackUntil: 0,
+    attackStartAt: 0,
+    /** @type {number | undefined} if set, melee swing VFX uses this duration in ms */
+    swingDurationMs: undefined,
+    charging: false,
+    prevHealth: 100,
+    chargeKeyDownAt: 0,
+    shootFlashUntil: 0,
+    /** @type {number | undefined} last `p.x` for run animation (blue) */
+    prevDrawX: undefined,
+  },
+  {
+    recoilUntil: 0,
+    attackUntil: 0,
+    attackStartAt: 0,
+    swingDurationMs: undefined,
+    charging: false,
+    prevHealth: 100,
+    chargeKeyDownAt: 0,
+    shootFlashUntil: 0,
+    /** @type {number | undefined} last `p.x` for run animation (red) */
+    prevDrawX: undefined,
+  },
 ];
 let roundLockUntil = 0;
+/** Start time of current between-round countdown (local single/multi). */
+let roundIntermissionStartAt = 0;
+/** Smoothed x for walk animation (online); snaps to `p.x` offline. */
+const playerPrevRenderX = [220, 760];
+const ONLINE_RENDER_PREV_LERP = 0.42;
+
+function syncPlayerRenderPrev(idx, x) {
+  if (mode === "online") {
+    const prev = playerPrevRenderX[idx];
+    playerPrevRenderX[idx] = prev + (x - prev) * ONLINE_RENDER_PREV_LERP;
+  } else {
+    playerPrevRenderX[idx] = x;
+  }
+}
 let localState = {
   round: 1,
   players: [
-    { x: 220, y: FLOOR_Y, vx: 0, vy: 0, health: 100, facing: 1, score: 0, color: "#2f7dff", jumpsUsed: 0, onGround: true, fireCooldown: 0 },
-    { x: 760, y: FLOOR_Y, vx: 0, vy: 0, health: 100, facing: -1, score: 0, color: "#e44b4b", jumpsUsed: 0, onGround: true, fireCooldown: 0 },
+    {
+      x: 220,
+      y: FLOOR_Y - PLAYER_BODY_H,
+      vx: 0,
+      vy: 0,
+      health: 100,
+      facing: 1,
+      score: 0,
+      color: "#2f7dff",
+      orbAmmo: ORB_AMMO_PER_ROUND,
+      jumpsUsed: 0,
+      onGround: true,
+      chargeStartAt: 0,
+    },
+    {
+      x: 760,
+      y: FLOOR_Y - PLAYER_BODY_H,
+      vx: 0,
+      vy: 0,
+      health: 100,
+      facing: -1,
+      score: 0,
+      color: "#e44b4b",
+      orbAmmo: ORB_AMMO_PER_ROUND,
+      jumpsUsed: 0,
+      onGround: true,
+      chargeStartAt: 0,
+    },
   ],
   projectiles: [],
+  buffPickActive: false,
+  buffPickLoser: 0,
+  buffPickInputUnlocked: false,
+  buffPickOptions: null,
+  /** Sorted id triplet for the last intermission; next pick avoids repeating the same set. */
+  buffLastOfferedKey: null,
 };
 
 const profile = {
@@ -66,11 +1086,28 @@ function closeSettings() {
 
 function setArcadeStep(step) {
   arcadeStep = step;
+  teardownRemapWizard();
+  clearArcadeExtra();
+  arcadeActionsEl.classList.remove("arcade-actions--char-pick");
+
+  if (step === "controls_p1") {
+    renderControlChoiceScreen(0);
+    return;
+  }
+  if (step === "controls_p2") {
+    renderControlChoiceScreen(1);
+    return;
+  }
+  if (step === "controls_online") {
+    renderOnlineControlChoice();
+    return;
+  }
+
   const steps = {
     welcome: {
       index: "Step 1 of 4",
       title: "Welcome to Bat Duel",
-      text: "Start a new arcade session and follow the guided setup.",
+      text: "Start a new arcade session and map your keys before the round.",
       actions: [{ id: "next", label: "Start Setup" }],
     },
     mode: {
@@ -106,6 +1143,10 @@ function setArcadeStep(step) {
     },
   };
   const view = steps[step];
+  if (!view) {
+    overlayEl.classList.remove("hidden");
+    return;
+  }
   stepLabelEl.textContent = view.index;
   arcadeTitleEl.textContent = view.title;
   arcadeTextEl.textContent = view.text;
@@ -124,6 +1165,81 @@ function hideArcadeOverlay() {
   overlayEl.classList.add("hidden");
 }
 
+/**
+ * Melee: keyed sword (plate points left in source; hilt at origin) + light reach hint.
+ * Art is shared for both fighters (P0 / P1 / fallback bodies).
+ */
+function drawMeleeSwingIndicator(p, v, baseY) {
+  const now = Date.now();
+  if (now >= v.attackUntil) return;
+  const swingDur = v.swingDurationMs != null ? v.swingDurationMs : SWING_DURATION_MS;
+  const swingT = clamp((now - v.attackStartAt) / Math.max(1, swingDur), 0, 1);
+  const fac = p.facing || 1;
+  const hx = Math.floor(p.x + PLAYER_BODY_W * 0.5);
+  const hy = Math.floor(baseY + 24);
+  const reach = MELEE_RANGE * (p.meleeRangeScale != null ? p.meleeRangeScale : 1) + 10;
+  const active = swingT > 0.12 && swingT < 0.62;
+  const steps = Math.ceil(reach / 3);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  if (meleeSwordBlit) {
+    const bl = meleeSwordBlit;
+    const s = Math.max(1.85, 17 / bl.ch) / 13.2;
+    const w = bl.cw * s;
+    const h = bl.ch * s;
+    const handX = hx + fac * 8;
+    const handY = Math.floor(baseY + 20);
+    const ang = (0.52 - swingT) * Math.PI * 0.55;
+    ctx.save();
+    ctx.translate(handX, handY);
+    ctx.rotate(ang);
+    ctx.scale(-fac, 1);
+    ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -w, -h * 0.5, w, h);
+    ctx.restore();
+    for (let i = 1; i < steps; i += 1) {
+      const px = hx + fac * i * 3;
+      const arc = Math.sin((i / steps) * Math.PI) * 6;
+      const py = hy - arc;
+      ctx.fillStyle = `rgba(200, 220, 255, ${0.06 + swingT * 0.1})`;
+      ctx.fillRect(Math.floor(px), Math.floor(py), 2, 2);
+    }
+  } else {
+    const pulse = 0.35 + 0.4 * Math.sin(swingT * Math.PI);
+    for (let i = 1; i < steps; i += 1) {
+      const px = hx + fac * i * 3;
+      const arc = Math.sin((i / steps) * Math.PI) * 6;
+      const py = hy - arc;
+      if (active && i > 3) {
+        ctx.fillStyle = `rgba(255, 235, 140, ${pulse * (0.25 + i * 0.028)})`;
+      } else {
+        ctx.fillStyle = `rgba(190, 210, 255, ${0.1 + swingT * 0.18})`;
+      }
+      ctx.fillRect(Math.floor(px), Math.floor(py), 2, 2);
+    }
+  }
+  if (active) {
+    const tip = hx + fac * reach;
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.35 + swingT * 0.25})`;
+    ctx.fillRect(Math.floor(tip), hy - 8, 3, 3);
+    ctx.fillRect(Math.floor(tip - fac * 4), hy - 4, 3, 3);
+    ctx.fillRect(Math.floor(tip - fac * 8), hy, 3, 3);
+  }
+  ctx.restore();
+}
+
+/** Visible team strip at the top of the body box (P0 blue, P1 red). */
+function drawFighterTopColorBand(p, baseY, idx) {
+  if (idx !== 0 && idx !== 1) return;
+  const bandH = Math.max(4, Math.floor(PLAYER_BODY_H * 0.13));
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = idx === 0 ? "rgba(70, 170, 255, 0.7)" : "rgba(255, 110, 120, 0.72)";
+  ctx.fillRect(p.x, baseY, PLAYER_BODY_W, bandH);
+  ctx.fillStyle = idx === 0 ? "rgba(35, 100, 220, 0.5)" : "rgba(200, 60, 70, 0.5)";
+  ctx.fillRect(p.x, baseY, PLAYER_BODY_W, 2);
+  ctx.restore();
+}
+
 function drawPlayer(p) {
   const idx = p.color === "#2f7dff" ? 0 : 1;
   const v = visualState[idx];
@@ -134,125 +1250,411 @@ function drawPlayer(p) {
   v.prevHealth = p.health;
   const recoil = now < v.recoilUntil ? 1 : 0;
   const attackPose = now < v.attackUntil ? 1 : 0;
-  const chargePose = v.charging ? 1 : 0;
 
-  const stride = Math.sin((Date.now() / 140 + p.x * 0.03) * Math.PI) * 4;
-  const armSwing = stride * 0.7 + (attackPose ? -8 : 0);
+  const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
+  const px = Math.floor(p.x);
+  const py = Math.floor(baseY);
+
+  if (idx === 0 && percivalIdleBlit) {
+    const movingH =
+      mode === "online"
+        ? v.prevDrawX != null && Math.abs(p.x - v.prevDrawX) > 0.2
+        : Math.abs(p.vx) > 0.1;
+    const useHit = recoil > 0 && percivalHitBlit != null;
+    const useRun =
+      !useHit && percivalRun != null && percivalRun.frames.length >= 4 && movingH;
+    const bl = useHit
+      ? percivalHitBlit
+      : useRun
+        ? (() => {
+            const f = percivalRun.frames;
+            const fi = Math.floor(performance.now() * 0.012) % f.length;
+            const fr = f[fi];
+            return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
+          })()
+        : percivalIdleBlit;
+    const s = Math.min((PLAYER_BODY_W * 0.96) / bl.cw, (PLAYER_BODY_H * 0.99) / bl.ch);
+    const dw = bl.cw * s;
+    const dh = bl.ch * s;
+    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1);
+    const footY = baseY + PLAYER_BODY_H;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    if (recoil && !useHit) {
+      ctx.fillStyle = "rgba(255, 60, 60, 0.22)";
+      ctx.fillRect(p.x, baseY, PLAYER_BODY_W, PLAYER_BODY_H);
+    }
+    ctx.translate(footX, footY);
+    ctx.scale(p.facing || 1, 1);
+    ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -dw / 2, -dh, dw, dh);
+    ctx.restore();
+  } else if (idx === 1 && guy2IdleBlit) {
+    const movingH =
+      mode === "online"
+        ? v.prevDrawX != null && Math.abs(p.x - v.prevDrawX) > 0.2
+        : Math.abs(p.vx) > 0.1;
+    const useHit = recoil > 0 && guy2HitBlit != null;
+    const useRun =
+      !useHit && guy2Run != null && guy2Run.frames.length >= 4 && movingH;
+    const bl = useHit
+      ? guy2HitBlit
+      : useRun
+        ? (() => {
+            const f = guy2Run.frames;
+            const fi = Math.floor(performance.now() * 0.012) % f.length;
+            const fr = f[fi];
+            return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
+          })()
+        : guy2IdleBlit;
+    const s = Math.min((PLAYER_BODY_W * 0.96) / bl.cw, (PLAYER_BODY_H * 0.99) / bl.ch);
+    const dw = bl.cw * s;
+    const dh = bl.ch * s;
+    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1);
+    const footY = baseY + PLAYER_BODY_H;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    if (recoil && !useHit) {
+      ctx.fillStyle = "rgba(255, 60, 60, 0.22)";
+      ctx.fillRect(p.x, baseY, PLAYER_BODY_W, PLAYER_BODY_H);
+    }
+    ctx.translate(footX, footY);
+    ctx.scale(p.facing || 1, 1);
+    ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -dw / 2, -dh, dw, dh);
+    ctx.restore();
+  } else {
+    const body = idx === 0 ? "#2f7dff" : "#e44b4b";
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(px - 2, py - 2, PLAYER_BODY_W + 4, PLAYER_BODY_H + 4);
+    ctx.fillStyle = body;
+    ctx.fillRect(px, py, PLAYER_BODY_W, PLAYER_BODY_H);
+    if (recoil) {
+      ctx.fillStyle = "rgba(255,60,60,0.35)";
+      ctx.fillRect(px, py, PLAYER_BODY_W, PLAYER_BODY_H);
+    }
+    ctx.restore();
+  }
+
+  drawFighterTopColorBand(p, baseY, idx);
+
+  if (attackPose) drawMeleeSwingIndicator(p, v, baseY);
+
+  const cx = p.x + PLAYER_BODY_W / 2 - recoil * 6 * (p.facing || 1);
+  const feetY = baseY + PLAYER_BODY_H;
+  drawShootMuzzleWorld(p, v, cx, feetY);
+
+  if (idx === 0 || idx === 1) v.prevDrawX = p.x;
+
+  syncPlayerRenderPrev(idx, p.x);
+}
+
+/** Extra world-space pixels so muzzle flash reads even if sprite bbox is tight. */
+function drawShootMuzzleWorld(p, v, cx, feetY) {
+  if (Date.now() >= v.shootFlashUntil) return;
+  const fac = p.facing || 1;
   ctx.save();
-  ctx.translate(p.x + 23 - recoil * 7 * (p.facing || 1), p.y + 26);
-  ctx.scale(p.facing || 1, 1);
-
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = 2.5;
-
-  // Legs
-  ctx.beginPath();
-  ctx.moveTo(-7, 18);
-  ctx.lineTo(-10, 34 + stride);
-  ctx.moveTo(7, 18);
-  ctx.lineTo(10, 34 - stride);
-  ctx.stroke();
-
-  // Torso
-  ctx.fillStyle = p.color;
-  ctx.beginPath();
-  ctx.roundRect(-13, -3, 26, 25, 8);
-  ctx.fill();
-  ctx.strokeRect(-13, -3, 26, 25);
-
-  // Arms
-  ctx.beginPath();
-  ctx.moveTo(-12, 6);
-  ctx.lineTo(-25, 12 + armSwing + (chargePose ? 3 : 0));
-  ctx.moveTo(12, 6);
-  ctx.lineTo(24, attackPose ? -5 : 12 - armSwing - (chargePose ? 10 : 0));
-  ctx.stroke();
-
-  // Bat in the forward hand
-  ctx.strokeStyle = "#1f1f1f";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  const batStartY = attackPose ? -5 : 12 - armSwing - (chargePose ? 10 : 0);
-  const batEndY = attackPose ? 12 : 26 - armSwing - (chargePose ? 12 : 0);
-  ctx.moveTo(24, batStartY);
-  ctx.lineTo(39, batEndY);
-  ctx.stroke();
-
-  // Head
-  ctx.fillStyle = "#f0c8a0";
-  ctx.beginPath();
-  ctx.arc(0, -16, 11, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-
-  // Hair band / helmet accent using team color
-  ctx.fillStyle = p.color;
-  ctx.fillRect(-10, -24, 20, 4);
-
-  // Shoulder guards for more human silhouette clarity
-  ctx.fillRect(-16, 1, 4, 7);
-  ctx.fillRect(12, 1, 4, 7);
-
-  // Face
-  ctx.fillStyle = "#fff";
-  ctx.beginPath();
-  ctx.arc(-4, -17, 2.5, 0, Math.PI * 2);
-  ctx.arc(4, -17, 2.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#111";
-  ctx.beginPath();
-  ctx.arc(-4, -17, 1, 0, Math.PI * 2);
-  ctx.arc(4, -17, 1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(-3, -11);
-  ctx.lineTo(3, -11);
-  ctx.stroke();
-
+  ctx.imageSmoothingEnabled = false;
+  const ox = cx + fac * 22;
+  const oy = feetY - 38;
+  const pix = [
+    [0, 0, "#fff"],
+    [4 * fac, -2, "#fef08a"],
+    [8 * fac, 1, "#fde047"],
+    [12 * fac, -4, "#fff"],
+  ];
+  for (const [dx, dy, c] of pix) {
+    ctx.fillStyle = c;
+    ctx.fillRect(Math.round(ox + dx), Math.round(oy + dy), 3, 3);
+  }
   ctx.restore();
 }
 
-function drawHealthBar(x, y, hp, color, label) {
-  ctx.fillStyle = "#0a1020";
-  ctx.fillRect(x, y, 260, 28);
-  ctx.strokeStyle = "#6f84b3";
-  ctx.strokeRect(x, y, 260, 28);
-  ctx.fillStyle = color;
-  ctx.fillRect(x + 4, y + 4, Math.max(0, (hp / 100) * 252), 20);
-  ctx.fillStyle = "#fff";
-  ctx.font = "700 13px Trebuchet MS";
-  ctx.fillText(`${label} ${Math.floor(hp)} HP`, x + 10, y + 18);
+function playerMaxHp(p) {
+  return p.maxHealth != null ? p.maxHealth : DEFAULT_MAX_HP;
+}
+
+function playerOrbAmmoDisplay(p) {
+  if (mode === "online") return null;
+  if (p.infiniteAmmo) return ORB_AMMO_PER_ROUND;
+  return clamp(p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND, 0, ORB_AMMO_PER_ROUND);
+}
+
+/** 5 distinct tiers: higher ratio = more charge. Colors read clearly in-game. */
+function chargeTierFromDisplayRatio(r) {
+  const x = clamp(r, 0, 1);
+  if (x < 0.2) return { label: "I", core: "#fef08a", rim: "#a16207", glow: "rgba(254, 240, 138, 0.6)", tip: "#fde047" };
+  if (x < 0.4) return { label: "II", core: "#fbbf24", rim: "#b45309", glow: "rgba(251, 191, 36, 0.62)", tip: "#f59e0b" };
+  if (x < 0.6) return { label: "III", core: "#fb923c", rim: "#c2410c", glow: "rgba(251, 146, 60, 0.64)", tip: "#ea580c" };
+  if (x < 0.8) return { label: "IV", core: "#e879f9", rim: "#a21caf", glow: "rgba(232, 121, 249, 0.65)", tip: "#c026d3" };
+  return { label: "V", core: "#e0e7ff", rim: "#5b21b6", glow: "rgba(196, 181, 253, 0.75)", tip: "#7c3aed" };
+}
+
+function chargeTierFromDamage(damage) {
+  return chargeTierFromDisplayRatio((damage - ORB_DAMAGE_MIN) / ORB_DAMAGE_RANGE);
+}
+
+function drawPixelDisc(cx0, cy0, r, fill, stroke) {
+  const cx = Math.round(cx0);
+  const cy = Math.round(cy0);
+  const ri = Math.max(1, Math.round(r));
+  for (let dy = -ri - 3; dy <= ri + 3; dy += 1) {
+    for (let dx = -ri - 3; dx <= ri + 3; dx += 1) {
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= ri * ri) {
+        ctx.fillStyle = fill;
+        ctx.fillRect(cx + dx, cy + dy, 1, 1);
+      } else if (d2 <= (ri + 2) * (ri + 2) && d2 > ri * ri) {
+        ctx.fillStyle = stroke;
+        ctx.fillRect(cx + dx, cy + dy, 1, 1);
+      }
+    }
+  }
+}
+
+function drawChargeOrb(p, playerIdx) {
+  const vs = visualState[playerIdx];
+  if (!vs.charging) return;
+  const ammo = playerOrbAmmoDisplay(p);
+  if (ammo !== null && ammo <= 0) return;
+  const start =
+    p.chargeStartAt != null && p.chargeStartAt > 0 ? p.chargeStartAt : vs.chargeKeyDownAt || 0;
+  if (start === 0) return;
+  let displayRatio;
+  if (p.instantMaxCharge) {
+    displayRatio = 1;
+  } else {
+    const holdMs = Date.now() - start;
+    if (holdMs < CHARGE_THRESHOLD_MS) return;
+    displayRatio = clamp((holdMs - CHARGE_THRESHOLD_MS) / CHARGE_SCALE_MS, 0, 1);
+  }
+  const tier = chargeTierFromDisplayRatio(displayRatio);
+  const pulse = 1 + 0.08 * Math.sin(performance.now() * 0.014);
+  const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
+  const cx = p.x + Math.floor(PLAYER_BODY_W * 0.52) + p.facing * (14 + displayRatio * 22);
+  const cy = baseY + Math.floor(PLAYER_BODY_H * 0.42);
+  const baseR = (3 + displayRatio * 18) * pulse;
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  drawPixelDisc(cx, cy, baseR + 4 + displayRatio * 5, tier.tip, "#0a0a0a");
+  drawPixelDisc(cx, cy, baseR + 1, tier.tip, "#1a1828");
+  drawPixelDisc(cx, cy, baseR, tier.core, tier.rim);
+  ctx.fillStyle = "#0a0a0a";
+  ctx.fillRect(Math.round(cx) - 1, Math.round(cy) - 4, 2, 6);
+  ctx.fillRect(Math.round(cx) + 2, Math.round(cy) - 4, 2, 6);
+  ctx.fillStyle = "#f1f5ff";
+  ctx.font = '8px "Press Start 2P", monospace';
+  ctx.textAlign = "center";
+  ctx.fillText(tier.label, Math.round(cx), Math.round(cy) + 3);
+  ctx.restore();
+}
+
+function drawProjectile(s) {
+  const tier = chargeTierFromDamage(s.damage);
+  const t = clamp((s.damage - ORB_DAMAGE_MIN) / ORB_DAMAGE_RANGE, 0, 1);
+  const x = Math.floor(s.x);
+  const y = Math.floor(s.y);
+  const w = Math.max(2, Math.ceil(s.w));
+  const h = Math.max(2, Math.ceil(s.h));
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "#0a0a0a";
+  ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  const mid = Math.max(1, Math.floor(h / 2));
+  ctx.fillStyle = tier.core;
+  ctx.fillRect(x, y, w, mid);
+  ctx.fillStyle = tier.tip;
+  ctx.fillRect(x, y + mid, w, h - mid);
+  ctx.fillStyle = tier.rim;
+  for (let i = 0; i < w; i += 2) {
+    ctx.fillRect(x + i, y + h - 2, 1, 2);
+  }
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(x + 1, y + 1, 2 + Math.floor(t * 3), 2);
+  const trail = 3 + Math.floor(t * 5);
+  const back = s.vx >= 0 ? -1 : 1;
+  for (let k = 1; k <= trail; k += 1) {
+    ctx.fillStyle = `rgba(255,255,255,${0.35 - k * 0.08})`;
+    ctx.fillRect(x - back * k * 2, y + Math.floor(h / 3), 2, 2);
+  }
+  ctx.restore();
 }
 
 function render() {
   updateLocalGame();
-  ctx.fillStyle = "#121a2f";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#30466f";
-  ctx.fillRect(0, 560, canvas.width, 60);
-  localState.projectiles.forEach((s) => {
-    ctx.fillStyle = "#ffd269";
-    ctx.fillRect(s.x, s.y, s.w, s.h);
-  });
+  beginPixelGameFrame();
+  drawArenaBackground();
+  drawPlatforms();
+  drawPixelGroundStrip();
+  localState.projectiles.forEach(drawProjectile);
   localState.players.forEach(drawPlayer);
-  drawHealthBar(18, 14, localState.players[0].health, localState.players[0].color, `Blue ${localState.players[0].score}`);
-  drawHealthBar(canvas.width - 278, 14, localState.players[1].health, localState.players[1].color, `Red ${localState.players[1].score}`);
-  ctx.fillStyle = "#fff";
-  ctx.font = "700 22px Trebuchet MS";
-  ctx.fillText(`Round ${localState.round}/10`, canvas.width / 2 - 68, 34);
+  if (overlayEl.classList.contains("hidden")) {
+    localState.players.forEach((p, i) => drawChargeOrb(p, i));
+  }
+  endPixelGameFrame();
+  drawHudOnView();
   requestAnimationFrame(render);
+}
+
+/** Horizontal stepped sky (no smooth gradients) for pixel look. */
+function fillPixelSkyBands(y0, y1, palette) {
+  const bands = palette.length;
+  const span = y1 - y0;
+  for (let y = y0; y < y1; y += 1) {
+    const t = (y - y0) / span;
+    const i = Math.min(bands - 1, Math.floor(t * bands));
+    ctx.fillStyle = palette[i];
+    ctx.fillRect(0, y, VIEW_W, 1);
+  }
+}
+
+function drawPixelFarSilhouettes(farColor, nearColor) {
+  for (let i = 0; i < 9; i += 1) {
+    const x = i * 130 - 20;
+    const hh = 72 + ((i * 41) % 62);
+    ctx.fillStyle = i % 2 === 0 ? farColor : nearColor;
+    ctx.fillRect(Math.floor(x), FLOOR_Y - hh, 90, hh);
+    ctx.strokeStyle = "#0a0a12";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(Math.floor(x) + 1, FLOOR_Y - hh + 1, 88, hh - 2);
+  }
+}
+
+function drawArenaBackground() {
+  ctx.imageSmoothingEnabled = false;
+  const level = currentLevel();
+  const theme = level.bg;
+  const w = VIEW_W;
+
+  if (theme === "sunny") {
+    fillPixelSkyBands(0, FLOOR_Y, ["#5ab8f0", "#7ecfff", "#b8ecff", "#ffe6a8", "#ffc860"]);
+    const sunX = Math.floor(w * 0.76);
+    const sunY = 88;
+    for (let dy = -28; dy <= 28; dy += 1) {
+      for (let dx = -28; dx <= 28; dx += 1) {
+        if (dx * dx + dy * dy <= 28 * 28) {
+          ctx.fillStyle = dx * dx + dy * dy < 18 * 18 ? "#fff8dc" : "#ffe8a0";
+          ctx.fillRect(sunX + dx, sunY + dy, 1, 1);
+        }
+      }
+    }
+    for (let i = 0; i < 5; i += 1) {
+      const cx = Math.floor(((i * 247 + 30) % (w + 80)) - 30);
+      const cy = 48 + (i * 23) % 40;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(cx - 28, cy - 8, 56, 16);
+      ctx.fillRect(cx + 6, cy - 6, 48, 14);
+      ctx.fillRect(cx - 40, cy - 4, 40, 12);
+    }
+    drawPixelFarSilhouettes("#5a8068", "#4a7058");
+  } else if (theme === "dusk") {
+    fillPixelSkyBands(0, FLOOR_Y, ["#4a3d6e", "#6b3d5a", "#a85a4a", "#3a3048"]);
+    drawPixelFarSilhouettes("#3a3058", "#2a2040");
+  } else if (theme === "storm") {
+    fillPixelSkyBands(0, FLOOR_Y, ["#3d4f60", "#2f3c4a", "#1e2834", "#141c24"]);
+    ctx.strokeStyle = "#8aa0b8";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 12; i += 1) {
+      const x0 = (i * 97) % w;
+      const y0 = 40 + (i * 17) % 120;
+      const x1 = (i * 97 + 40) % w;
+      const y1 = 90 + (i * 13) % 100;
+      for (let t = 0; t <= 24; t += 1) {
+        const px = Math.floor(x0 + ((x1 - x0) * t) / 24);
+        const py = Math.floor(y0 + ((y1 - y0) * t) / 24);
+        ctx.fillStyle = "#a8c0d8";
+        ctx.fillRect(px, py, 2, 2);
+      }
+    }
+    drawPixelFarSilhouettes("#3a4858", "#2a3848");
+  } else if (theme === "aurora") {
+    fillPixelSkyBands(0, FLOOR_Y, ["#0f2035", "#1a4d4a", "#2a6a62", "#2a3060", "#121828"]);
+    ctx.fillStyle = "#4ad0a8";
+    for (let j = 0; j < 3; j += 1) {
+      for (let x = 0; x < w; x += 6) {
+        const wave = Math.floor(18 + 10 * Math.sin(x * 0.02 + j * 1.7) + j * 22);
+        ctx.fillRect(x, 90 + wave, 4, 4);
+      }
+    }
+    drawPixelFarSilhouettes("#3a4a70", "#2a3858");
+  } else {
+    fillPixelSkyBands(0, FLOOR_Y, ["#1d2a4f", "#182440", "#15203b", "#121a30", "#101827"]);
+    drawPixelFarSilhouettes("#3a4880", "#2a3868");
+  }
+
+  ctx.fillStyle = "rgba(90, 110, 160, 0.35)";
+  ctx.fillRect(0, FLOOR_Y - 28, w, 32);
+}
+
+function drawPixelGroundStrip() {
+  const g = currentLevel().ground;
+  const y0 = FLOOR_Y;
+  ctx.fillStyle = "#0a0a0a";
+  ctx.fillRect(0, y0, VIEW_W, VIEW_H - y0);
+  for (let x = 0; x < VIEW_W; x += 16) {
+    const alt = (x / 16) % 2 === 0;
+    ctx.fillStyle = alt ? g : shadeHex(g, 0.88);
+    ctx.fillRect(x, y0, 16, VIEW_H - y0);
+  }
+  ctx.fillStyle = "#1a1a22";
+  for (let x = 0; x < VIEW_W; x += 8) {
+    ctx.fillRect(x, y0, 8, 4);
+  }
+}
+
+function shadeHex(hex, mul) {
+  const h = hex.replace("#", "");
+  const r = Math.min(255, Math.floor(parseInt(h.slice(0, 2), 16) * mul));
+  const g = Math.min(255, Math.floor(parseInt(h.slice(2, 4), 16) * mul));
+  const b = Math.min(255, Math.floor(parseInt(h.slice(4, 6), 16) * mul));
+  return `rgb(${r},${g},${b})`;
+}
+
+function drawPlatforms() {
+  ctx.imageSmoothingEnabled = false;
+  currentPlatforms().forEach((plat) => {
+    const x = Math.floor(plat.x);
+    const y = Math.floor(plat.y);
+    const w = Math.ceil(plat.w);
+    const h = Math.ceil(plat.h);
+    for (let bx = x; bx < x + w; bx += 8) {
+      for (let by = y; by < y + h; by += 6) {
+        const stripe = ((bx >> 3) + (by >> 2)) % 2 === 0;
+        ctx.fillStyle = stripe ? "#4a6ab8" : "#3a5590";
+        ctx.fillRect(bx, by, Math.min(8, x + w - bx), Math.min(6, y + h - by));
+      }
+    }
+    ctx.strokeStyle = "#0a0a0a";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    ctx.strokeStyle = "#6a8ad0";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 4, y + 3, w - 8, h - 6);
+  });
 }
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
 }
 
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
 function tryJump(idx, code) {
+  if (visualState[idx].charging) return;
   const p = localState.players[idx];
   const now = performance.now();
   const prev = keyTimes.get(code) || 0;
   keyTimes.set(code, now);
   const boosted = now - prev < 260;
+  if (p.infiniteJumps) {
+    p.vy = JUMP_VELOCITY * (boosted ? 1.12 : 1);
+    p.onGround = false;
+    p.jumpsUsed = Math.min(p.jumpsUsed + 1, 9);
+    return;
+  }
   if (p.onGround || p.jumpsUsed < 2) {
     p.vy = JUMP_VELOCITY * (boosted ? 1.12 : 1);
     p.onGround = false;
@@ -264,26 +1666,111 @@ function doMelee(attackerIdx) {
   const defenderIdx = attackerIdx === 0 ? 1 : 0;
   const attacker = localState.players[attackerIdx];
   const defender = localState.players[defenderIdx];
-  visualState[attackerIdx].attackUntil = Date.now() + 180;
-  const inRange = Math.abs(attacker.x - defender.x) <= 72;
+  const dur = Math.round(SWING_DURATION_MS * (attacker.meleeSwingScale != null ? attacker.meleeSwingScale : 1));
+  const t0 = Date.now();
+  visualState[attackerIdx].attackStartAt = t0;
+  visualState[attackerIdx].attackUntil = t0 + dur;
+  visualState[attackerIdx].swingDurationMs = dur;
+  const r = MELEE_RANGE * (attacker.meleeRangeScale != null ? attacker.meleeRangeScale : 1);
+  const inRange = Math.abs(attacker.x - defender.x) <= r;
   const facingToward = (defender.x - attacker.x) * attacker.facing > 0;
   if (inRange && facingToward) {
-    defender.health = clamp(defender.health - 10, 0, 100);
+    const mult = attacker.damageMult != null ? attacker.damageMult : 1;
+    const dmg = Math.round(10 * mult);
+    defender.health = clamp(defender.health - dmg, 0, playerMaxHp(defender));
+    const push = defender.x >= attacker.x ? 1 : -1;
+    defender.vx = push * MELEE_KNOCKBACK_VX;
   }
 }
 
-function fireProjectile(attackerIdx, forcedDamage = null) {
+function triggerSwing(idx) {
+  const p = localState.players[idx];
+  const dur = Math.round(SWING_DURATION_MS * (p.meleeSwingScale != null ? p.meleeSwingScale : 1));
+  const t0 = Date.now();
+  visualState[idx].attackStartAt = t0;
+  visualState[idx].attackUntil = t0 + dur;
+  visualState[idx].swingDurationMs = dur;
+}
+
+function computeChargedShot(heldMs) {
+  const effective = clamp(heldMs - CHARGE_THRESHOLD_MS, 0, CHARGE_SCALE_MS);
+  const ratio = CHARGE_SCALE_MS > 0 ? effective / CHARGE_SCALE_MS : 0;
+  const curved = Math.pow(ratio, 0.88);
+  return {
+    damage: Math.round(ORB_DAMAGE_MIN + ORB_DAMAGE_RANGE * curved),
+    w: 9 + Math.round(20 * curved),
+    h: 4 + Math.round(11 * curved),
+    speed: 9 + 4 * curved,
+  };
+}
+
+/**
+ * @param {number} attackerIdx
+ * @param {number | { damage: number, w?: number, h?: number, speed?: number } | null} override - null = use current charge hold
+ */
+function fireProjectile(attackerIdx, override = null) {
   const attacker = localState.players[attackerIdx];
-  const damage = forcedDamage ?? 10;
-  localState.projectiles.push({
-    x: attacker.x + 20,
-    y: attacker.y + 2,
-    w: 18,
-    h: 8,
-    vx: attacker.facing * 9,
-    target: attackerIdx === 0 ? 1 : 0,
-    damage,
-  });
+  const orbCost = attacker.tripleShot ? 3 : 1;
+  const ammo = attacker.orbAmmo != null ? attacker.orbAmmo : ORB_AMMO_PER_ROUND;
+  if (!attacker.infiniteAmmo && ammo < orbCost) return;
+  let damage;
+  let w;
+  let h;
+  let speed;
+  if (override != null && typeof override === "object") {
+    damage = override.damage;
+    w = override.w ?? 14;
+    h = override.h ?? 6;
+    speed = override.speed ?? 9;
+  } else if (typeof override === "number") {
+    damage = override;
+    w = 14;
+    h = 6;
+    speed = 9;
+  } else {
+    const heldMs = attacker.instantMaxCharge
+      ? CHARGE_THRESHOLD_MS + CHARGE_SCALE_MS
+      : clamp(Date.now() - attacker.chargeStartAt, 0, MAX_CHARGE_MS);
+    const s = computeChargedShot(heldMs);
+    damage = s.damage;
+    w = s.w;
+    h = s.h;
+    speed = s.speed;
+  }
+  const mult = attacker.damageMult != null ? attacker.damageMult : 1;
+  const dmg = Math.round(damage * mult);
+  const cy = attacker.y + Math.floor(PLAYER_BODY_H * 0.42) + (6 - h) / 2;
+  const baseX = attacker.x + Math.floor(PLAYER_BODY_W * 0.62) + 2;
+  const target = attackerIdx === 0 ? 1 : 0;
+  const pushShot = (vx, vy) => {
+    localState.projectiles.push({
+      x: baseX,
+      y: cy,
+      w,
+      h,
+      vx,
+      vy: vy ?? 0,
+      target,
+      damage: dmg,
+    });
+  };
+  if (attacker.tripleShot) {
+    const fac = attacker.facing;
+    const baseAng = fac === 1 ? 0 : Math.PI;
+    const spread = 0.17;
+    [-spread, 0, spread].forEach((da) => {
+      const ang = baseAng + da * fac;
+      pushShot(speed * Math.cos(ang), speed * Math.sin(ang));
+    });
+  } else {
+    pushShot(attacker.facing * speed, 0);
+  }
+  if (!attacker.infiniteAmmo) {
+    attacker.orbAmmo = ammo - orbCost;
+  } else {
+    attacker.orbAmmo = ORB_AMMO_PER_ROUND;
+  }
+  visualState[attackerIdx].shootFlashUntil = Date.now() + 120;
 }
 
 function resetInputState() {
@@ -292,36 +1779,198 @@ function resetInputState() {
   visualState[1].charging = false;
 }
 
+function clearCombatBuffsFromPlayers() {
+  for (const p of localState.players) {
+    delete p.maxHealth;
+    delete p.tripleShot;
+    delete p.damageMult;
+    delete p.infiniteJumps;
+    delete p.infiniteAmmo;
+    delete p.instantMaxCharge;
+    delete p.meleeRangeScale;
+    delete p.meleeSwingScale;
+  }
+}
+
+function healPlayerToCap(p) {
+  p.health = playerMaxHp(p);
+}
+
+let buffAutoPickTimer = null;
+let buffPickGateTimer = null;
+
+function hideBuffPickOverlay() {
+  const wrap = document.getElementById("buffPickOverlay");
+  if (wrap) wrap.classList.add("hidden");
+  const gate = document.getElementById("buffPickGateBlock");
+  if (gate) gate.classList.add("hidden");
+  if (buffAutoPickTimer != null) {
+    clearTimeout(buffAutoPickTimer);
+    buffAutoPickTimer = null;
+  }
+  if (buffPickGateTimer != null) {
+    clearTimeout(buffPickGateTimer);
+    buffPickGateTimer = null;
+  }
+  localState.buffPickInputUnlocked = false;
+}
+
+function applyBuffChoice(buffId) {
+  if (!localState.buffPickActive || !localState.buffPickInputUnlocked) return;
+  if (!BUFF_DEFS[buffId]) return;
+  const loser = localState.buffPickLoser;
+  const win = loser === 0 ? 1 : 0;
+  const L = localState.players[loser];
+  const W = localState.players[win];
+  healPlayerToCap(W);
+  if (buffId === "triple") {
+    L.tripleShot = true;
+  } else if (buffId === "tank") {
+    const prevMax = playerMaxHp(L);
+    L.maxHealth = prevMax + 30;
+  } else if (buffId === "power") {
+    const cur = L.damageMult != null && L.damageMult > 0 ? L.damageMult : 1;
+    L.damageMult = cur * POWER_BUFF_DAMAGE_MULT;
+  } else if (buffId === "infiniteJumps") {
+    L.infiniteJumps = true;
+  } else if (buffId === "infiniteAmmo") {
+    L.infiniteAmmo = true;
+    L.orbAmmo = ORB_AMMO_PER_ROUND;
+  } else if (buffId === "instantMaxCharge") {
+    L.instantMaxCharge = true;
+  } else if (buffId === "meleeLong") {
+    L.meleeRangeScale = (L.meleeRangeScale != null ? L.meleeRangeScale : 1) * 2;
+    L.meleeSwingScale = (L.meleeSwingScale != null ? L.meleeSwingScale : 1) * 2;
+  }
+  healPlayerToCap(L);
+  localState.buffPickActive = false;
+  hideBuffPickOverlay();
+  roundIntermissionStartAt = Date.now();
+  roundLockUntil = Date.now() + ROUND_INTERMISSION_MS;
+}
+
+function showBuffPickOverlay(loserIdx) {
+  const wrap = document.getElementById("buffPickOverlay");
+  if (!wrap) return;
+  const { triplet, key } = pickRandomBuffTriplet();
+  localState.buffPickOptions = triplet;
+  localState.buffLastOfferedKey = key;
+  const btnWrap = document.getElementById("buffPickButtons");
+  if (btnWrap) {
+    btnWrap.innerHTML = "";
+    const keyRows = [
+      { k1: "A", k2: "←" },
+      { k1: "W", k2: "↑" },
+      { k1: "D", k2: "→" },
+    ];
+    for (let i = 0; i < 3; i += 1) {
+      const id = triplet[i];
+      const d = BUFF_DEFS[id];
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "buff-card buff-btn";
+      b.setAttribute("data-buff", id);
+      b.innerHTML = `<span class="buff-card-face">
+        <span class="buff-name">${d.name}</span>
+        <span class="buff-desc">${d.desc}</span>
+        <span class="buff-keys" aria-label="Shortcuts"><kbd>${keyRows[i].k1}</kbd><kbd>${keyRows[i].k2}</kbd></span>
+      </span>`;
+      btnWrap.appendChild(b);
+    }
+  }
+  const title = document.getElementById("buffPickTitle");
+  const sub = document.getElementById("buffPickSub");
+  const gate = document.getElementById("buffPickGateBlock");
+  const name = loserIdx === 0 ? "Blue" : "Red";
+  if (title) title.textContent = `${name} lost — choose a comeback buff`;
+  if (sub) {
+    sub.textContent =
+      "Wait 2 seconds without clicking — then pick a card or use A/← · W/↑ · D/→.";
+  }
+  localState.buffPickInputUnlocked = false;
+  if (gate) gate.classList.remove("hidden");
+  wrap.classList.remove("hidden");
+  if (buffPickGateTimer != null) {
+    clearTimeout(buffPickGateTimer);
+    buffPickGateTimer = null;
+  }
+  buffPickGateTimer = setTimeout(() => {
+    buffPickGateTimer = null;
+    localState.buffPickInputUnlocked = true;
+    if (gate) gate.classList.add("hidden");
+    if (sub && localState.buffPickActive) {
+      sub.textContent =
+        "Buff lasts the rest of the match. Click a card, or A/← (buff 1), W/↑ (buff 2), D/→ (buff 3).";
+    }
+    const firstCard = wrap.querySelector(".buff-card");
+    if (firstCard && typeof firstCard.focus === "function") {
+      requestAnimationFrame(() => firstCard.focus());
+    }
+  }, BUFF_PICK_GATE_MS);
+  if (buffAutoPickTimer != null) {
+    clearTimeout(buffAutoPickTimer);
+    buffAutoPickTimer = null;
+  }
+  if (mode === "single" && loserIdx === 1) {
+    buffAutoPickTimer = setTimeout(() => {
+      buffAutoPickTimer = null;
+      const opts = localState.buffPickOptions;
+      if (opts && opts.length) applyBuffChoice(opts[Math.floor(Math.random() * opts.length)]);
+    }, BUFF_PICK_GATE_MS + 450);
+  }
+}
+
 function updateLocalGame() {
   if (mode === "online") return;
   if (!overlayEl.classList.contains("hidden")) return;
+  if (localState.buffPickActive) return;
   if (Date.now() < roundLockUntil) return;
 
   // Guard against missed keyup when focus changes.
-  if (!keys.has("KeyS")) visualState[0].charging = false;
-  if (!keys.has("ArrowDown")) visualState[1].charging = false;
+  const b0 = keyBindings.p0;
+  const b1 = keyBindings.p1;
+  if (!keys.has(p0FireKey())) visualState[0].charging = false;
+  if (!keys.has(p1FireKey())) visualState[1].charging = false;
 
   const p1 = localState.players[0];
   const p2 = localState.players[1];
-  p1.fireCooldown = Math.max(0, p1.fireCooldown - 1);
-  p2.fireCooldown = Math.max(0, p2.fireCooldown - 1);
-  const p1Left = keys.has("KeyA");
-  const p1Right = keys.has("KeyD");
-  const p2Left = mode === "multi" ? keys.has("ArrowLeft") : false;
-  const p2Right = mode === "multi" ? keys.has("ArrowRight") : false;
+  const p1Left = keys.has(b0.left);
+  const p1Right = keys.has(b0.right);
+  const p2Left = mode === "multi" ? keys.has(b1.left) : false;
+  const p2Right = mode === "multi" ? keys.has(b1.right) : false;
 
-  p1.vx = p1Left === p1Right ? 0 : p1Left ? -MOVE_SPEED : MOVE_SPEED;
-  if (p1.vx !== 0) p1.facing = p1.vx > 0 ? 1 : -1;
+  const target1 = p1Left === p1Right ? 0 : p1Left ? -MOVE_SPEED : MOVE_SPEED;
+  const ax1 = Math.abs(target1) < 0.01 ? MOVE_STOP_ACCEL : MOVE_ACCEL;
+  p1.vx += (target1 - p1.vx) * ax1;
+  if (Math.abs(target1) < 0.01 && Math.abs(p1.vx) < MOVE_VX_SNAP) p1.vx = 0;
+  if (Math.abs(target1) > 0.01) p1.facing = target1 > 0 ? 1 : -1;
+  else if (Math.abs(p1.vx) > 0.18) p1.facing = p1.vx > 0 ? 1 : -1;
 
   if (mode === "multi") {
-    p2.vx = p2Left === p2Right ? 0 : p2Left ? -MOVE_SPEED : MOVE_SPEED;
-    if (p2.vx !== 0) p2.facing = p2.vx > 0 ? 1 : -1;
+    const target2 = p2Left === p2Right ? 0 : p2Left ? -MOVE_SPEED : MOVE_SPEED;
+    const ax2 = Math.abs(target2) < 0.01 ? MOVE_STOP_ACCEL : MOVE_ACCEL;
+    p2.vx += (target2 - p2.vx) * ax2;
+    if (Math.abs(target2) < 0.01 && Math.abs(p2.vx) < MOVE_VX_SNAP) p2.vx = 0;
+    if (Math.abs(target2) > 0.01) p2.facing = target2 > 0 ? 1 : -1;
+    else if (Math.abs(p2.vx) > 0.18) p2.facing = p2.vx > 0 ? 1 : -1;
   } else {
     const d = p1.x - p2.x;
-    p2.vx = Math.abs(d) > 60 ? (d > 0 ? MOVE_SPEED * 0.75 : -MOVE_SPEED * 0.75) : 0;
-    if (p2.vx !== 0) p2.facing = p2.vx > 0 ? 1 : -1;
-    if (Math.abs(d) < 70 && Math.random() < 0.02) doMelee(1);
-    if (Math.abs(d) > 140 && Math.random() < 0.01) fireProjectile(1, 20);
+    const target2 = Math.abs(d) > 60 ? (d > 0 ? MOVE_SPEED * 0.75 : -MOVE_SPEED * 0.75) : 0;
+    const ax2b = Math.abs(target2) < 0.01 ? MOVE_STOP_ACCEL : MOVE_ACCEL * 0.88;
+    p2.vx += (target2 - p2.vx) * ax2b;
+    if (Math.abs(target2) < 0.01 && Math.abs(p2.vx) < MOVE_VX_SNAP) p2.vx = 0;
+    if (Math.abs(target2) > 0.01) p2.facing = target2 > 0 ? 1 : -1;
+    else if (Math.abs(p2.vx) > 0.14) p2.facing = p2.vx > 0 ? 1 : -1;
+    if (Math.abs(d) < MELEE_RANGE + 12 && Math.random() < 0.02) doMelee(1);
+    if (Math.abs(d) > 140 && Math.random() < 0.01) {
+      const p2c = localState.players[1];
+      const cost = p2c.tripleShot ? 3 : 1;
+      const am = p2c.orbAmmo != null ? p2c.orbAmmo : ORB_AMMO_PER_ROUND;
+      if (am >= cost || p2c.infiniteAmmo) {
+        p2c.chargeStartAt = Date.now() - CHARGE_THRESHOLD_MS - CHARGE_SCALE_MS * 0.35;
+        fireProjectile(1);
+      }
+    }
     if (p2.onGround && Math.random() < 0.005) {
       p2.vy = JUMP_VELOCITY;
       p2.onGround = false;
@@ -329,45 +1978,73 @@ function updateLocalGame() {
     }
   }
 
-  if (keys.has("KeyS") && p1.fireCooldown <= 0) {
-    fireProjectile(0, 10);
-    p1.fireCooldown = 6;
-    visualState[0].attackUntil = Date.now() + 120;
-  }
-  if (mode === "multi" && keys.has("ArrowDown") && p2.fireCooldown <= 0) {
-    fireProjectile(1, 10);
-    p2.fireCooldown = 6;
-    visualState[1].attackUntil = Date.now() + 120;
-  }
-
-  for (const p of localState.players) {
-    p.vy += GRAVITY;
-    p.x = clamp(p.x + p.vx, 0, canvas.width - 46);
+  for (let pi = 0; pi < localState.players.length; pi += 1) {
+    const p = localState.players[pi];
+    const previousBottom = p.y + PLAYER_BODY_H;
+    const slowFall = visualState[pi].charging && !p.onGround;
+    p.vy += GRAVITY * (slowFall ? CHARGE_AIR_GRAVITY_MULT : 1);
+    p.x = clamp(p.x + p.vx, 0, VIEW_W - PLAYER_BODY_W);
     p.y += p.vy;
-    if (p.y >= FLOOR_Y) {
-      p.y = FLOOR_Y;
+    const bottom = p.y + PLAYER_BODY_H;
+    let landed = false;
+
+    if (p.vy >= 0) {
+      const plats = [...currentPlatforms()].sort((a, b) => a.y - b.y);
+      for (const plat of plats) {
+        const crossed = previousBottom <= plat.y && bottom >= plat.y;
+        const insideX = p.x + PLAYER_BODY_W > plat.x && p.x < plat.x + plat.w;
+        if (crossed && insideX) {
+          p.y = plat.y - PLAYER_BODY_H;
+          p.vy = 0;
+          p.onGround = true;
+          p.jumpsUsed = 0;
+          landed = true;
+          break;
+        }
+      }
+    }
+
+    if (!landed && bottom >= FLOOR_Y) {
+      p.y = FLOOR_Y - PLAYER_BODY_H;
       p.vy = 0;
       p.onGround = true;
       p.jumpsUsed = 0;
-    } else {
+    } else if (!landed) {
       p.onGround = false;
     }
   }
 
   localState.projectiles.forEach((shot) => {
     shot.x += shot.vx;
+    shot.y += shot.vy ?? 0;
+    const shotRect = { x: shot.x, y: shot.y, w: shot.w, h: shot.h };
+    for (const plat of currentPlatforms()) {
+      if (rectsOverlap(shotRect, plat)) {
+        shot.dead = true;
+        break;
+      }
+    }
+    if (shot.dead) return;
     const target = localState.players[shot.target];
-    const hit = shot.x < target.x + 46 && shot.x + shot.w > target.x && shot.y < target.y + 40 && shot.y + shot.h > target.y - 20;
+    const hit = rectsOverlap(shotRect, {
+      x: target.x,
+      y: target.y,
+      w: PLAYER_BODY_W,
+      h: PLAYER_BODY_H,
+    });
     if (hit) {
-      target.health = clamp(target.health - shot.damage, 0, 100);
+      target.health = clamp(target.health - shot.damage, 0, playerMaxHp(target));
       shot.dead = true;
     }
-    if (shot.x < -50 || shot.x > canvas.width + 50) shot.dead = true;
+    if (shot.x < -50 || shot.x > VIEW_W + 50 || shot.y < -80 || shot.y > VIEW_H + 40) {
+      shot.dead = true;
+    }
   });
   localState.projectiles = localState.projectiles.filter((s) => !s.dead);
 
   if (p1.health <= 0 || p2.health <= 0) {
     const winner = p1.health <= 0 ? 1 : 0;
+    const loser = winner === 0 ? 1 : 0;
     localState.players[winner].score += 1;
     showBanner(`${winner === 0 ? "Blue" : "Red"} wins round`);
     localState.round += 1;
@@ -376,16 +2053,23 @@ function updateLocalGame() {
       localState.round = 1;
       p1.score = 0;
       p2.score = 0;
+      clearCombatBuffsFromPlayers();
     }
-    p1.health = 100;
-    p2.health = 100;
+    healPlayerToCap(p1);
+    healPlayerToCap(p2);
     p1.x = 220;
     p2.x = 760;
-    p1.y = FLOOR_Y;
-    p2.y = FLOOR_Y;
+    playerPrevRenderX[0] = p1.x;
+    playerPrevRenderX[1] = p2.x;
+    p1.y = FLOOR_Y - PLAYER_BODY_H;
+    p2.y = FLOOR_Y - PLAYER_BODY_H;
     p1.vx = p2.vx = p1.vy = p2.vy = 0;
+    p1.orbAmmo = ORB_AMMO_PER_ROUND;
+    p2.orbAmmo = ORB_AMMO_PER_ROUND;
     localState.projectiles = [];
-    roundLockUntil = Date.now() + 900;
+    localState.buffPickLoser = loser;
+    localState.buffPickActive = true;
+    showBuffPickOverlay(loser);
   }
 }
 
@@ -455,7 +2139,16 @@ function setupSocket() {
   });
 
   socket.on("match:state", (state) => {
-    localState = state;
+    localState = {
+      round: state.round,
+      players: state.players || [],
+      projectiles: state.projectiles || [],
+      lockUntil: state.lockUntil ?? 0,
+      intermissionStartedAt: state.intermissionStartedAt ?? 0,
+      buffPickActive: false,
+      buffPickLoser: 0,
+      buffPickInputUnlocked: false,
+    };
   });
 
   socket.on("match:end", ({ reason }) => {
@@ -467,60 +2160,177 @@ function setupSocket() {
 }
 
 function localReset() {
+  clearCombatBuffsFromPlayers();
   localState = {
     round: 1,
     players: [
-      { x: 220, y: FLOOR_Y, vx: 0, vy: 0, health: 100, facing: 1, score: 0, color: "#2f7dff", jumpsUsed: 0, onGround: true, fireCooldown: 0 },
-      { x: 760, y: FLOOR_Y, vx: 0, vy: 0, health: 100, facing: -1, score: 0, color: "#e44b4b", jumpsUsed: 0, onGround: true, fireCooldown: 0 },
+      {
+        x: 220,
+        y: FLOOR_Y - PLAYER_BODY_H,
+        vx: 0,
+        vy: 0,
+        health: 100,
+        facing: 1,
+        score: 0,
+        color: "#2f7dff",
+        orbAmmo: ORB_AMMO_PER_ROUND,
+        jumpsUsed: 0,
+        onGround: true,
+        chargeStartAt: 0,
+      },
+      {
+        x: 760,
+        y: FLOOR_Y - PLAYER_BODY_H,
+        vx: 0,
+        vy: 0,
+        health: 100,
+        facing: -1,
+        score: 0,
+        color: "#e44b4b",
+        orbAmmo: ORB_AMMO_PER_ROUND,
+        jumpsUsed: 0,
+        onGround: true,
+        chargeStartAt: 0,
+      },
     ],
     projectiles: [],
+    buffPickActive: false,
+    buffPickLoser: 0,
+    buffPickInputUnlocked: false,
+    buffPickOptions: null,
+    buffLastOfferedKey: null,
   };
+  hideBuffPickOverlay();
   roundLockUntil = 0;
-  visualState[0] = { recoilUntil: 0, attackUntil: 0, charging: false, prevHealth: 100 };
-  visualState[1] = { recoilUntil: 0, attackUntil: 0, charging: false, prevHealth: 100 };
+  roundIntermissionStartAt = 0;
+  playerPrevRenderX[0] = 220;
+  playerPrevRenderX[1] = 760;
+  visualState[0] = {
+    recoilUntil: 0,
+    attackUntil: 0,
+    attackStartAt: 0,
+    swingDurationMs: undefined,
+    charging: false,
+    prevHealth: 100,
+    chargeKeyDownAt: 0,
+    shootFlashUntil: 0,
+    prevDrawX: undefined,
+  };
+  visualState[1] = {
+    recoilUntil: 0,
+    attackUntil: 0,
+    attackStartAt: 0,
+    swingDurationMs: undefined,
+    charging: false,
+    prevHealth: 100,
+    chargeKeyDownAt: 0,
+    shootFlashUntil: 0,
+    prevDrawX: undefined,
+  };
+}
+
+function onlineIntermissionActive() {
+  return mode === "online" && (localState.lockUntil || 0) > Date.now();
 }
 
 window.addEventListener("keydown", (e) => {
-  if (GAME_KEYS.has(e.code)) e.preventDefault();
+  if (remapState.active) {
+    return;
+  }
+  if (localState.buffPickActive) {
+    e.preventDefault();
+    if (e.repeat) return;
+    if (!localState.buffPickInputUnlocked) return;
+    const bopt = localState.buffPickOptions;
+    if (bopt && bopt[0] && bopt[1] && bopt[2]) {
+      if (e.code === "KeyA" || e.code === "ArrowLeft") applyBuffChoice(bopt[0]);
+      else if (e.code === "KeyW" || e.code === "ArrowUp") applyBuffChoice(bopt[1]);
+      else if (e.code === "KeyD" || e.code === "ArrowRight") applyBuffChoice(bopt[2]);
+    }
+    return;
+  }
+  if (shouldPreventGameKey(e.code)) e.preventDefault();
   keys.add(e.code);
   if (mode !== "online") {
-    if (e.code === "KeyW") tryJump(0, "KeyW");
-    if (mode === "multi" && e.code === "ArrowUp") tryJump(1, "ArrowUp");
-    if (e.code === "KeyS" && !visualState[0].charging) {
-      visualState[0].charging = true;
+    const b0 = keyBindings.p0;
+    const b1 = keyBindings.p1;
+    if (e.code === b0.jump) tryJump(0, b0.jump);
+    if (mode === "multi" && e.code === b1.jump) tryJump(1, b1.jump);
+    if (e.code === b0.melee && !e.repeat) {
+      doMelee(0);
     }
-    if (mode === "multi" && e.code === "ArrowDown" && !visualState[1].charging) {
-      visualState[1].charging = true;
+    if (mode === "multi" && e.code === b1.melee && !e.repeat) {
+      doMelee(1);
+    }
+    if (e.code === p0FireKey() && !visualState[0].charging) {
+      const p0 = localState.players[0];
+      const a0 = p0.orbAmmo != null ? p0.orbAmmo : ORB_AMMO_PER_ROUND;
+      if (p0.infiniteAmmo || a0 > 0) {
+        p0.chargeStartAt = Date.now();
+        visualState[0].charging = true;
+      }
+    }
+    if (mode === "multi" && e.code === p1FireKey() && !visualState[1].charging) {
+      const pr = localState.players[1];
+      const a1 = pr.orbAmmo != null ? pr.orbAmmo : ORB_AMMO_PER_ROUND;
+      if (pr.infiniteAmmo || a1 > 0) {
+        pr.chargeStartAt = Date.now();
+        visualState[1].charging = true;
+      }
     }
   }
   if (mode === "online" && socket && roomId) {
-    const controls =
-      playerIndex === 0
-        ? { left: keys.has("KeyA"), right: keys.has("KeyD"), attack: keys.has("KeyS") }
-        : { left: keys.has("ArrowLeft"), right: keys.has("ArrowRight"), attack: keys.has("ArrowDown") };
-    if (e.code === (playerIndex === 0 ? "KeyS" : "ArrowDown")) visualState[playerIndex].charging = true;
+    const ok = onlineK();
+    const controls = {
+      left: keys.has(ok.left),
+      right: keys.has(ok.right),
+    };
+    if (e.code === ok.attack && !onlineIntermissionActive()) {
+      visualState[playerIndex].charging = true;
+      visualState[playerIndex].chargeKeyDownAt = Date.now();
+      socket.emit("match:input", { action: "chargeStart", controls });
+    }
     socket.emit("match:input", { controls });
   }
 });
 
 window.addEventListener("keyup", (e) => {
-  if (GAME_KEYS.has(e.code)) e.preventDefault();
+  if (remapState.active) {
+    return;
+  }
+  if (localState.buffPickActive) {
+    e.preventDefault();
+    return;
+  }
+  if (shouldPreventGameKey(e.code)) e.preventDefault();
   keys.delete(e.code);
   if (mode !== "online") {
-    if (e.code === "KeyS") {
+    if (e.code === p0FireKey()) {
+      const heldMs = Date.now() - localState.players[0].chargeStartAt;
       visualState[0].charging = false;
+      if (heldMs >= CHARGE_THRESHOLD_MS) {
+        fireProjectile(0);
+      }
     }
-    if (mode === "multi" && e.code === "ArrowDown") {
+    if (mode === "multi" && e.code === p1FireKey()) {
+      const heldMs = Date.now() - localState.players[1].chargeStartAt;
       visualState[1].charging = false;
+      if (heldMs >= CHARGE_THRESHOLD_MS) {
+        fireProjectile(1);
+      }
     }
   }
   if (mode === "online" && socket && roomId) {
-    const controls =
-      playerIndex === 0
-        ? { left: keys.has("KeyA"), right: keys.has("KeyD"), attack: keys.has("KeyS") }
-        : { left: keys.has("ArrowLeft"), right: keys.has("ArrowRight"), attack: keys.has("ArrowDown") };
-    if (e.code === (playerIndex === 0 ? "KeyS" : "ArrowDown")) {
+    const ok = onlineK();
+    const controls = {
+      left: keys.has(ok.left),
+      right: keys.has(ok.right),
+    };
+    if (e.code === ok.attack && !onlineIntermissionActive()) {
+      const heldMs = Date.now() - (visualState[playerIndex].chargeKeyDownAt || Date.now());
       visualState[playerIndex].charging = false;
+      triggerSwing(playerIndex);
+      socket.emit("match:input", { action: "chargeRelease", controls });
     }
     socket.emit("match:input", { controls });
   }
@@ -536,19 +2346,19 @@ function setupUI() {
     mode = "single";
     setMatchStatus("Single player mode.");
     localReset();
-    setArcadeStep("ready");
+    setArcadeStep("controls_p1");
     closeSettings();
   });
   document.getElementById("multiBtn").addEventListener("click", () => {
     mode = "multi";
     setMatchStatus("Local multiplayer (same keyboard).");
     localReset();
-    setArcadeStep("ready");
+    setArcadeStep("controls_p1");
     closeSettings();
   });
   document.getElementById("onlineBtn").addEventListener("click", () => {
     mode = "online";
-    setArcadeStep(profile.token ? "ready" : "auth");
+    setArcadeStep(profile.token ? "controls_online" : "auth");
   });
   document.getElementById("restartBtn").addEventListener("click", () => {
     localReset();
@@ -581,7 +2391,7 @@ function setupUI() {
       await loadProfileFromServer();
       renderFriends();
       if (mode === "online") {
-        setArcadeStep("ready");
+        setArcadeStep("controls_online");
       }
       closeSettings();
     } catch (err) {
@@ -616,30 +2426,56 @@ function setupUI() {
   });
 
   arcadeActionsEl.addEventListener("click", (e) => {
-    const action = e.target?.dataset?.action;
+    const t = e.target && e.target.closest ? e.target.closest("[data-action]") : null;
+    const action = t && t.dataset ? t.dataset.action : e.target?.dataset?.action;
     if (!action) return;
     if (action === "next") setArcadeStep("mode");
     if (action === "single") {
       mode = "single";
       localReset();
       setMatchStatus("Single player mode.");
-      setArcadeStep("ready");
+      setArcadeStep("controls_p1");
     }
     if (action === "multi") {
       mode = "multi";
       localReset();
       setMatchStatus("Local multiplayer (same keyboard).");
-      setArcadeStep("ready");
+      setArcadeStep("controls_p1");
     }
     if (action === "online") {
       mode = "online";
-      setArcadeStep(profile.token ? "ready" : "auth");
+      setArcadeStep(profile.token ? "controls_online" : "auth");
       openSettings();
     }
     if (action === "checkAuth") {
-      setArcadeStep(profile.token ? "ready" : "auth");
+      setArcadeStep(profile.token ? (mode === "online" ? "controls_online" : "ready") : "auth");
       if (!profile.token) showBanner("Verify email first");
       if (!profile.token) openSettings();
+    }
+    if (action === "bind0_keep") {
+      resetPlayerBindingsDefault(0);
+      if (mode === "multi") setArcadeStep("controls_p2");
+      else setArcadeStep("ready");
+    }
+    if (action === "bind0_map") {
+      startRemapWizard(0);
+    }
+    if (action === "bind1_keep") {
+      resetPlayerBindingsDefault(1);
+      setArcadeStep("ready");
+    }
+    if (action === "bind1_map") {
+      startRemapWizard(1);
+    }
+    if (action === "bind1_back") {
+      setArcadeStep("controls_p1");
+    }
+    if (action === "online_bind_keep") {
+      resetOnlineBindingsDefault();
+      setArcadeStep("ready");
+    }
+    if (action === "online_bind_map") {
+      startRemapWizardOnline();
     }
     if (action === "backMode") setArcadeStep("mode");
     if (action === "launch") {
@@ -663,9 +2499,19 @@ function setupUI() {
   document.getElementById("settingsToggleBtn").addEventListener("click", openSettings);
   document.getElementById("settingsCloseBtn").addEventListener("click", closeSettings);
   settingsBackdropEl.addEventListener("click", closeSettings);
+
+  const buffOverlay = document.getElementById("buffPickOverlay");
+  if (buffOverlay) {
+    buffOverlay.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-buff]");
+      if (!btn) return;
+      applyBuffChoice(btn.getAttribute("data-buff"));
+    });
+  }
 }
 
 async function boot() {
+  loadKeyBindings();
   await loadProfileFromServer();
   document.getElementById("usernameInput").value = profile.username;
   document.getElementById("emailInput").value = profile.email;
