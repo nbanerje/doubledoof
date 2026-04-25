@@ -1068,6 +1068,20 @@ io.on("connection", (socket) => {
       room.buffPickActive = false;
       room.buffPickInputUnlocked = false;
       room.buffUnlockAt = 0;
+      if (buffId === "fireBreath") {
+        room.intermissionStartedAt = 0;
+        room.lockUntil = Date.now() + 10 * 60 * 1000;
+      } else {
+        room.intermissionStartedAt = Date.now();
+        room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
+      }
+    });
+
+    socket.on("fire:bind:done", () => {
+      const room = [...rooms.values()].find((r) => r.players.some((p) => p.socketId === socket.id));
+      if (!room) return;
+      const idx = room.players.findIndex((p) => p.socketId === socket.id);
+      if (!room.players[idx]?.fireBreath) return;
       room.intermissionStartedAt = Date.now();
       room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
     });

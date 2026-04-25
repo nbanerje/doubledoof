@@ -2392,13 +2392,42 @@ function syncRedThousandHpAfterLocalReset() {
   healPlayerToCap(p);
 }
 
-let fireBindState = { active: false, playerIdx: 0, online: false };
+let fireBindState = { active: false, playerIdx: 0, online: false, onDone: null };
 
-function startFireBreathKeyBind(playerIdx, online = false) {
-  if (touchState.enabled) return;
+function finishFireBreathKeyBind() {
+  const done = fireBindState.onDone;
+  fireBindState = { active: false, playerIdx: 0, online: false, onDone: null };
+  window.removeEventListener("keydown", onFireBreathBindKeydown, true);
+  hideArcadeOverlay();
+  if (typeof done === "function") done();
+}
+
+function renderFireBreathBindPrompt(message = "") {
+  arcadeStep = "fire_bind";
+  teardownRemapWizard();
+  clearArcadeExtra();
+  arcadeActionsEl.classList.remove("arcade-actions--char-pick");
+  stepLabelEl.textContent = "Fire Breath";
+  arcadeTitleEl.textContent = "Map Fire Breath";
+  arcadeTextEl.textContent =
+    "Press the key you want to hold for Fire Breath. The round is paused until you choose a key.";
+  arcadeActionsEl.innerHTML = "";
+  if (arcadeExtraEl) {
+    arcadeExtraEl.innerHTML = message
+      ? `<p class="bind-hint">${escapeHtml(message)}</p><p class="bind-muted">Pick a key that is not already used by movement, jump, melee, or orb.</p>`
+      : `<p class="bind-muted">Choose a new unused key. Existing controls cannot be reused.</p>`;
+  }
+  overlayEl.classList.remove("hidden");
+}
+
+function startFireBreathKeyBind(playerIdx, online = false, onDone = null) {
+  if (touchState.enabled) {
+    if (typeof onDone === "function") onDone();
+    return;
+  }
   if (fireBindState.active) return;
-  fireBindState = { active: true, playerIdx, online };
-  showBanner("Press a key for Fire Breath", 5000);
+  fireBindState = { active: true, playerIdx, online, onDone };
+  renderFireBreathBindPrompt();
   window.addEventListener("keydown", onFireBreathBindKeydown, true);
 }
 
@@ -2408,6 +2437,10 @@ function onFireBreathBindKeydown(e) {
   e.stopPropagation();
   const code = e.code;
   if (!code || code === "Escape") return;
+  if (bindingCodesFlat().has(code)) {
+    renderFireBreathBindPrompt(`${formatKeyLabel(code)} is already used. Pick another key.`);
+    return;
+  }
   if (fireBindState.online) {
     keyBindings.online.fire = code;
   } else if (fireBindState.playerIdx === 0) {
@@ -2416,9 +2449,8 @@ function onFireBreathBindKeydown(e) {
     keyBindings.p1.fire = code;
   }
   saveKeyBindings();
-  fireBindState.active = false;
-  window.removeEventListener("keydown", onFireBreathBindKeydown, true);
   showBanner(`Fire Breath mapped to ${formatKeyLabel(code)}`, 2200);
+  finishFireBreathKeyBind();
 }
 
 function startFireBreathLocal(idx) {
@@ -2460,9 +2492,13 @@ function applyBuffChoice(buffId) {
   if (!BUFF_DEFS[buffId]) return;
   if (mode === "online") {
     if (socket && roomId) socket.emit("buff:pick", { buffId });
-    if (buffId === "fireBreath") startFireBreathKeyBind(playerIndex, true);
     localState.buffPickActive = false;
     hideBuffPickOverlay();
+    if (buffId === "fireBreath") {
+      startFireBreathKeyBind(playerIndex, true, () => {
+        if (socket && roomId) socket.emit("fire:bind:done");
+      });
+    }
     return;
   }
   const loser = localState.buffPickLoser;
@@ -2490,16 +2526,22 @@ function applyBuffChoice(buffId) {
     L.meleeSwingScale = (L.meleeSwingScale != null ? L.meleeSwingScale : 1) * 2;
   } else if (buffId === "fireBreath") {
     L.fireBreath = true;
-    startFireBreathKeyBind(loser, false);
   }
   healPlayerToCap(L);
   localState.buffPickActive = false;
   hideBuffPickOverlay();
-  startLocalRoundCountdown();
-  localState.players[0].chargeStartAt = 0;
-  localState.players[1].chargeStartAt = 0;
-  visualState[0].charging = false;
-  visualState[1].charging = false;
+  const finishIntermission = () => {
+    startLocalRoundCountdown();
+    localState.players[0].chargeStartAt = 0;
+    localState.players[1].chargeStartAt = 0;
+    visualState[0].charging = false;
+    visualState[1].charging = false;
+  };
+  if (buffId === "fireBreath") {
+    startFireBreathKeyBind(loser, false, finishIntermission);
+    return;
+  }
+  finishIntermission();
 }
 
 function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
@@ -2918,7 +2960,9 @@ function setupSocket() {
     localState.players.forEach((p, i) => {
       if (p?.fireBreathing && !p.fireStartAt) p.fireStartAt = Date.now();
       if (p?.fireBreath && i === playerIndex && !touchState.enabled && !onlineK().fire) {
-        startFireBreathKeyBind(playerIndex, true);
+        startFireBreathKeyBind(playerIndex, true, () => {
+          if (socket && roomId) socket.emit("fire:bind:done");
+        });
       }
     });
     for (let i = 0; i < 2; i += 1) {
