@@ -57,8 +57,155 @@ const sesClient = sesRegion ? new SESClient({ region: sesRegion }) : null;
 
 const sessions = new Map();
 const socketByUser = new Map();
-const matchQueue = [];
 const rooms = new Map();
+/** @type {Map<string, { socketId: string, shareName: string, username: string }>} */
+const onlineLobby = new Map();
+
+const LOBBY_ADJ = [
+  "Swift",
+  "Bright",
+  "Quick",
+  "Cosmic",
+  "Lucky",
+  "Neon",
+  "Super",
+  "Turbo",
+  "Mega",
+  "Hyper",
+];
+const LOBBY_NOUN = [
+  "Fox",
+  "Panda",
+  "Tiger",
+  "Owl",
+  "Bolt",
+  "Spark",
+  "Ace",
+  "Star",
+  "Wave",
+  "Comet",
+];
+
+function allocShareName() {
+  for (let n = 0; n < 80; n += 1) {
+    const a = LOBBY_ADJ[Math.floor(Math.random() * LOBBY_ADJ.length)];
+    const b = LOBBY_NOUN[Math.floor(Math.random() * LOBBY_NOUN.length)];
+    const num = Math.floor(Math.random() * 90 + 10);
+    const s = `${a}${b}${num}`;
+    let clash = false;
+    for (const v of onlineLobby.values()) {
+      if (v.shareName === s) {
+        clash = true;
+        break;
+      }
+    }
+    if (!clash) return s;
+  }
+  return `Guest${Math.floor(Math.random() * 900000 + 100000)}`;
+}
+
+function broadcastLobby() {
+  const list = [...onlineLobby.entries()].map(([userId, v]) => ({
+    userId,
+    shareName: v.shareName,
+    username: v.username,
+  }));
+  io.emit("lobby:players", list);
+}
+
+function findHostRoomId(userId) {
+  for (const [rid, room] of rooms.entries()) {
+    if (room.players[0].id === userId) return rid;
+  }
+  return null;
+}
+
+function detachUserFromRooms(userId, exceptRoomId) {
+  for (const [rid, room] of [...rooms.entries()]) {
+    if (rid === exceptRoomId) continue;
+    if (room.players[0].id === userId) {
+      io.to(rid).emit("match:end", { reason: "Host left the match" });
+      rooms.delete(rid);
+    } else if (room.players[1].id === userId) {
+      room.players[1].id = null;
+      room.players[1].socketId = null;
+    }
+  }
+}
+
+function clearGuestSlotEverywhere(userId) {
+  for (const room of rooms.values()) {
+    if (room.players[1].id === userId) {
+      room.players[1].id = null;
+      room.players[1].socketId = null;
+    }
+  }
+}
+
+function createHostRoom(hostUserId, hostSocketId) {
+  const roomId = uuidv4();
+  const players = [
+    {
+      id: hostUserId,
+      socketId: hostSocketId,
+      x: 220,
+      y: 0,
+      vx: 0,
+      health: 100,
+      facing: 1,
+      score: 0,
+      controls: {},
+      charging: false,
+      chargeStart: 0,
+      color: "#2f7dff",
+    },
+    {
+      id: null,
+      socketId: null,
+      x: 760,
+      y: 0,
+      vx: 0,
+      health: 100,
+      facing: -1,
+      score: 0,
+      controls: {},
+      charging: false,
+      chargeStart: 0,
+      color: "#e44b4b",
+    },
+  ];
+  rooms.set(roomId, {
+    id: roomId,
+    round: 1,
+    players,
+    projectiles: [],
+    lockUntil: 0,
+    intermissionStartedAt: 0,
+  });
+  io.to(hostSocketId).emit("match:start", { roomId, playerIndex: 0 });
+  return roomId;
+}
+
+function attachGuestToRoom(roomId, guestUserId, guestSocketId) {
+  const room = rooms.get(roomId);
+  if (!room) return { ok: false, reason: "Room not found" };
+  const p1 = room.players[1];
+  if (p1.id != null && p1.id !== guestUserId) {
+    return { ok: false, reason: "That match already has a red fighter" };
+  }
+  if (p1.socketId != null && p1.id === guestUserId) {
+    p1.socketId = guestSocketId;
+    io.to(guestSocketId).emit("match:start", { roomId, playerIndex: 1 });
+    return { ok: true };
+  }
+  if (p1.socketId != null) {
+    return { ok: false, reason: "Opponent is already connected" };
+  }
+  p1.id = guestUserId;
+  p1.socketId = guestSocketId;
+  io.to(guestSocketId).emit("match:start", { roomId, playerIndex: 1 });
+  return { ok: true };
+}
 
 app.use(cors());
 app.use(express.json());
@@ -274,50 +421,6 @@ app.get("/api/health", (_, res) => {
   res.json({ ok: true });
 });
 
-function newMatch(playerA, playerB) {
-  const roomId = uuidv4();
-  const players = [
-    {
-      id: playerA.userId,
-      socketId: playerA.socketId,
-      x: 220,
-      y: 0,
-      vx: 0,
-      health: 100,
-      facing: 1,
-      score: 0,
-      controls: {},
-      charging: false,
-      chargeStart: 0,
-      color: "#2f7dff",
-    },
-    {
-      id: playerB.userId,
-      socketId: playerB.socketId,
-      x: 760,
-      y: 0,
-      vx: 0,
-      health: 100,
-      facing: -1,
-      score: 0,
-      controls: {},
-      charging: false,
-      chargeStart: 0,
-      color: "#e44b4b",
-    },
-  ];
-  rooms.set(roomId, {
-    id: roomId,
-    round: 1,
-    players,
-    projectiles: [],
-    lockUntil: 0,
-    intermissionStartedAt: 0,
-  });
-  io.to(playerA.socketId).emit("match:start", { roomId, playerIndex: 0 });
-  io.to(playerB.socketId).emit("match:start", { roomId, playerIndex: 1 });
-}
-
 function updateRoom(room) {
   const now = Date.now();
   if (room.lockUntil > now) return;
@@ -414,73 +517,178 @@ io.use((socket, next) => {
 });
 
 io.on("connection", (socket) => {
-  socketByUser.set(socket.userId, socket.id);
-
-  socket.on("queue:join", () => {
-    const alreadyQueued = matchQueue.find((q) => q.userId === socket.userId);
-    if (alreadyQueued) return;
-    matchQueue.push({ userId: socket.userId, socketId: socket.id });
-    if (matchQueue.length >= 2) {
-      const a = matchQueue.shift();
-      const b = matchQueue.shift();
-      newMatch(a, b);
+  void (async () => {
+    let userRow;
+    try {
+      userRow = await pool.query("SELECT username FROM users WHERE id = $1", [socket.userId]);
+    } catch {
+      socket.disconnect(true);
+      return;
     }
-  });
+    const username = userRow.rows[0]?.username || "Player";
+    const shareName = allocShareName();
+    onlineLobby.set(socket.userId, { socketId: socket.id, shareName, username });
+    socketByUser.set(socket.userId, socket.id);
+    socket.emit("lobby:self", { shareName, userId: socket.userId });
 
-  socket.on("match:input", (payload) => {
-    const room = [...rooms.values()].find((r) => r.players.some((p) => p.socketId === socket.id));
-    if (!room) return;
-    const idx = room.players.findIndex((p) => p.socketId === socket.id);
-    const player = room.players[idx];
-    const enemy = room.players[idx === 0 ? 1 : 0];
-    if (!player) return;
-
-    player.controls = payload.controls || {};
-    if (payload.action === "chargeStart") {
-      player.charging = true;
-      player.chargeStart = Date.now();
+    for (const [rid, room] of rooms.entries()) {
+      const idx = room.players.findIndex((p) => p.id === socket.userId);
+      if (idx < 0) continue;
+      room.players[idx].socketId = socket.id;
+      socket.emit("match:start", { roomId: rid, playerIndex: idx });
     }
-    if (payload.action === "chargeRelease" && player.charging) {
-      const heldMs = Date.now() - player.chargeStart;
-      if (heldMs < MELEE_QUICK_TAP_MS) {
-        const inRange = Math.abs(player.x - enemy.x) <= MELEE_RANGE;
-        const facingToward = (enemy.x - player.x) * player.facing > 0;
-        if (inRange && facingToward) {
-          enemy.health = Math.max(0, enemy.health - 10);
+
+    broadcastLobby();
+
+    socket.on("lobby:list", () => {
+      socket.emit(
+        "lobby:players",
+        [...onlineLobby.entries()].map(([userId, v]) => ({
+          userId,
+          shareName: v.shareName,
+          username: v.username,
+        }))
+      );
+    });
+
+    socket.on("room:create", () => {
+      clearGuestSlotEverywhere(socket.userId);
+      if (findHostRoomId(socket.userId)) {
+        socket.emit("game:error", { message: "You already have a match as host" });
+        return;
+      }
+      createHostRoom(socket.userId, socket.id);
+      broadcastLobby();
+    });
+
+    socket.on("invite:send", ({ targetUserId }) => {
+      const target = String(targetUserId || "");
+      if (!target || target === socket.userId) return;
+      const entry = onlineLobby.get(target);
+      if (!entry) {
+        socket.emit("game:error", { message: "That player is not online" });
+        return;
+      }
+
+      const targetHostRoomId = findHostRoomId(target);
+      if (targetHostRoomId) {
+        const room = rooms.get(targetHostRoomId);
+        const p1 = room.players[1];
+        if (p1.socketId != null && p1.id != null && p1.id !== socket.userId) {
+          socket.emit("game:error", { message: "That player's match is full" });
+          return;
         }
+        detachUserFromRooms(socket.userId, targetHostRoomId);
+        const joined = attachGuestToRoom(targetHostRoomId, socket.userId, socket.id);
+        if (!joined.ok) {
+          socket.emit("game:error", { message: joined.reason });
+          return;
+        }
+        broadcastLobby();
+        return;
+      }
+
+      clearGuestSlotEverywhere(socket.userId);
+      let roomId = findHostRoomId(socket.userId);
+      if (!roomId) {
+        roomId = createHostRoom(socket.userId, socket.id);
       } else {
-        const cappedMs = Math.min(heldMs, MAX_CHARGE_MS);
-        const shot = chargedShotFromHeldMs(cappedMs);
-        const centerY = 544;
-        room.projectiles.push({
-          x: player.x + 20,
-          y: centerY - shot.h / 2,
-          w: shot.w,
-          h: shot.h,
-          vx: player.facing * shot.speed,
-          damage: shot.damage,
-          targetIdx: idx === 0 ? 1 : 0,
-        });
+        const room = rooms.get(roomId);
+        const p1 = room.players[1];
+        if (p1.socketId != null && p1.id != null && p1.id !== target) {
+          socket.emit("game:error", {
+            message: "Your match already has an opponent. Wait until they disconnect to invite someone else.",
+          });
+          return;
+        }
       }
-      player.charging = false;
-    }
-  });
+      const fromShareName = onlineLobby.get(socket.userId)?.shareName || "Player";
+      io.to(entry.socketId).emit("invite:incoming", {
+        roomId,
+        fromUserId: socket.userId,
+        fromShareName,
+      });
+    });
 
-  socket.on("match:join", ({ roomId }) => {
-    if (rooms.has(roomId)) socket.join(roomId);
-  });
-
-  socket.on("disconnect", () => {
-    socketByUser.delete(socket.userId);
-    const queueIdx = matchQueue.findIndex((q) => q.socketId === socket.id);
-    if (queueIdx >= 0) matchQueue.splice(queueIdx, 1);
-    for (const [roomId, room] of rooms.entries()) {
-      if (room.players.some((p) => p.socketId === socket.id)) {
-        io.to(roomId).emit("match:end", { reason: "Opponent disconnected" });
-        rooms.delete(roomId);
+    socket.on("invite:accept", ({ roomId: rid }) => {
+      const roomId = String(rid || "");
+      if (!rooms.has(roomId)) {
+        socket.emit("game:error", { message: "That match no longer exists" });
+        return;
       }
-    }
-  });
+      detachUserFromRooms(socket.userId, roomId);
+      const result = attachGuestToRoom(roomId, socket.userId, socket.id);
+      if (!result.ok) {
+        socket.emit("game:error", { message: result.reason });
+        return;
+      }
+      broadcastLobby();
+    });
+
+    socket.on("invite:decline", () => {
+      /* client-only UI cleanup; no server state */
+    });
+
+    socket.on("match:input", (payload) => {
+      const room = [...rooms.values()].find((r) => r.players.some((p) => p.socketId === socket.id));
+      if (!room) return;
+      const idx = room.players.findIndex((p) => p.socketId === socket.id);
+      const player = room.players[idx];
+      const enemy = room.players[idx === 0 ? 1 : 0];
+      if (!player) return;
+
+      player.controls = payload.controls || {};
+      if (payload.action === "chargeStart") {
+        player.charging = true;
+        player.chargeStart = Date.now();
+      }
+      if (payload.action === "chargeRelease" && player.charging) {
+        const heldMs = Date.now() - player.chargeStart;
+        if (heldMs < MELEE_QUICK_TAP_MS) {
+          const inRange = Math.abs(player.x - enemy.x) <= MELEE_RANGE;
+          const facingToward = (enemy.x - player.x) * player.facing > 0;
+          if (inRange && facingToward) {
+            enemy.health = Math.max(0, enemy.health - 10);
+          }
+        } else {
+          const cappedMs = Math.min(heldMs, MAX_CHARGE_MS);
+          const shot = chargedShotFromHeldMs(cappedMs);
+          const centerY = 544;
+          room.projectiles.push({
+            x: player.x + 20,
+            y: centerY - shot.h / 2,
+            w: shot.w,
+            h: shot.h,
+            vx: player.facing * shot.speed,
+            damage: shot.damage,
+            targetIdx: idx === 0 ? 1 : 0,
+          });
+        }
+        player.charging = false;
+      }
+    });
+
+    socket.on("match:join", ({ roomId }) => {
+      if (rooms.has(roomId)) socket.join(roomId);
+    });
+
+    socket.on("disconnect", () => {
+      socketByUser.delete(socket.userId);
+      onlineLobby.delete(socket.userId);
+      broadcastLobby();
+      for (const [roomId, room] of rooms.entries()) {
+        const idx = room.players.findIndex((p) => p.socketId === socket.id);
+        if (idx < 0) continue;
+        if (idx === 0) {
+          io.to(roomId).emit("match:end", { reason: "Host disconnected" });
+          rooms.delete(roomId);
+        } else {
+          room.players[1].id = null;
+          room.players[1].socketId = null;
+        }
+      }
+    });
+  })();
 });
 
 initDb()

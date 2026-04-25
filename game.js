@@ -164,13 +164,19 @@ function drawHudOnView() {
   vc.font = HUD_FONT_TITLE;
   hudStrokeFillText(
     vc,
-    `Round ${localState.round} / 10  ·  ${lvl.name}`,
+    `Match first to ${WINS_TO_END_MATCH}  ·  ${lvl.name}  ·  Round ${localState.round}`,
     VIEW_W / 2,
     28,
     "#f4f7ff"
   );
   vc.font = HUD_FONT_SMALL;
-  hudStrokeFillText(vc, `Wins  Blue ${p0.score}  ·  Red ${p1.score}`, VIEW_W / 2, 50, "rgba(228,235,255,0.95)");
+  hudStrokeFillText(
+    vc,
+    `Wins  Blue ${p0.score} / ${WINS_TO_END_MATCH}  ·  Red ${p1.score} / ${WINS_TO_END_MATCH}`,
+    VIEW_W / 2,
+    50,
+    "rgba(228,235,255,0.95)"
+  );
   vc.textAlign = "left";
   if (overlayEl.classList.contains("hidden") && !localState.buffPickActive) {
     drawRoundIntermissionHud(vc);
@@ -240,30 +246,75 @@ function shuffleInPlace(a) {
   return a;
 }
 
+/** `triple` is always one of the three. Everything else: weight 1; Bottomless (infinite ammo) is rarer. */
+const BUFF_POOL_NO_TRIPLE = BUFF_POOL.filter((id) => id !== "triple");
+const BUFF_INFINITE_AMMO_RARITY = 0.12;
+
+function buffPickWeight(id) {
+  return id === "infiniteAmmo" ? BUFF_INFINITE_AMMO_RARITY : 1;
+}
+
 /**
- * Picks 3 random distinct buffs. After the first buff intermission, avoids the same 3
- * (as a set) as the previous one so the line-up “switches up.”
+ * Picks 2 distinct buffs from `ids` without replacement, favoring rarer `infiniteAmmo` less often.
+ */
+function pickWeightedPairWithoutReplacement(ids) {
+  if (ids.length < 2) {
+    return ids.length === 1 ? [ids[0], ids[0]] : ["tank", "power"];
+  }
+  let wSum = 0;
+  for (const id of ids) wSum += buffPickWeight(id);
+  let r = Math.random() * wSum;
+  let first = ids[ids.length - 1];
+  for (const id of ids) {
+    r -= buffPickWeight(id);
+    if (r <= 0) {
+      first = id;
+      break;
+    }
+  }
+  const rest = ids.filter((id) => id !== first);
+  wSum = 0;
+  for (const id of rest) wSum += buffPickWeight(id);
+  r = Math.random() * wSum;
+  let second = rest[rest.length - 1];
+  for (const id of rest) {
+    r -= buffPickWeight(id);
+    if (r <= 0) {
+      second = id;
+      break;
+    }
+  }
+  return [first, second];
+}
+
+/**
+ * Picks 3 cards: always includes **triple**; the other 2 are weighted (Bottomless is rare).
+ * Order is shuffled so the triple card moves between A / W / D. Same-set avoidance vs last intermission.
  */
 function pickRandomBuffTriplet() {
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    const pool = shuffleInPlace([...BUFF_POOL]);
-    const t = [pool[0], pool[1], pool[2]];
-    const key = [...t].sort().join("|");
+    const [x, y] = pickWeightedPairWithoutReplacement([...BUFF_POOL_NO_TRIPLE]);
+    const triplet = ["triple", x, y];
+    shuffleInPlace(triplet);
+    const key = [...triplet].sort().join("|");
     if (!localState.buffLastOfferedKey || key !== localState.buffLastOfferedKey) {
-      return { triplet: t, key };
+      return { triplet, key };
     }
   }
-  const pool = shuffleInPlace([...BUFF_POOL]);
-  const t = [pool[0], pool[1], pool[2]];
-  return { triplet: t, key: [...t].sort().join("|") };
+  const [x, y] = pickWeightedPairWithoutReplacement([...BUFF_POOL_NO_TRIPLE]);
+  const triplet = ["triple", x, y];
+  shuffleInPlace(triplet);
+  return { triplet, key: [...triplet].sort().join("|") };
 }
 const SWING_DURATION_MS = 200;
 /** Bat swing reach (shorter than before) */
 const MELEE_RANGE = 48;
 /** Horizontal push on defender when melee connects */
-const MELEE_KNOCKBACK_VX = 16;
+const MELEE_KNOCKBACK_VX = 32;
 const DEFAULT_MAX_HP = 100;
 const TANK_BUFF_MAX_HP = 130;
+/** A match ends as soon as one side reaches this many round wins. */
+const WINS_TO_END_MATCH = 5;
 /** Charged orb damage = `ORB_DAMAGE_MIN + ORB_DAMAGE_RANGE * chargeCurve` (before power buff). */
 const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
@@ -815,7 +866,7 @@ function renderOnlineControlChoice() {
   stepLabelEl.textContent = "Control setup";
   arcadeTitleEl.textContent = "Your keys (online)";
   arcadeTextEl.textContent =
-    "Map movement and attack before matchmaking. These keys apply whether you spawn on the left or right.";
+    "Map movement and attack before you enter the lobby. These keys apply on blue or red side.";
   arcadeActionsEl.innerHTML = "";
   if (arcadeExtraEl) arcadeExtraEl.innerHTML = `<p class="arcade-bind-summary">${describeOnlineBindings()}</p>`;
 
@@ -834,7 +885,7 @@ function renderOnlineControlChoice() {
   overlayEl.classList.remove("hidden");
 }
 
-/** 10 rounds × distinct layout + sky theme (`sunny` uses bright daytime backdrops). */
+/** Distinct level layouts; `getLevelForRound` cycles (first-to-5 match length is independent). */
 const LEVELS = [
   {
     name: "Neon Wharf",
@@ -961,10 +1012,20 @@ function currentPlatforms() {
 }
 
 let mode = "single";
+/** Konami-style: last digit keys typed (digits only); `2017` → red (P2) gets 1000 max HP in local play. */
+let cheatRedDigitBuffer = "";
+let cheatRedThousandHp = false;
+const CHEAT_RED_MAX_HP = 1000;
 let socket = null;
 let roomId = null;
 let playerIndex = 0;
 let arcadeStep = "welcome";
+let myShareName = "";
+let myLobbyUserId = "";
+/** @type {{ userId: string, shareName: string, username: string }[]} */
+let lobbyRoster = [];
+/** @type {{ roomId: string, fromShareName: string, fromUserId: string }[]} */
+let pendingInvites = [];
 const visualState = [
   {
     recoilUntil: 0,
@@ -972,6 +1033,8 @@ const visualState = [
     attackStartAt: 0,
     /** @type {number | undefined} if set, melee swing VFX uses this duration in ms */
     swingDurationMs: undefined,
+    /** Melee damage + knockback applied at most once per swing (when blade AABB hits). */
+    meleeDealt: false,
     charging: false,
     prevHealth: 100,
     chargeKeyDownAt: 0,
@@ -984,6 +1047,7 @@ const visualState = [
     attackUntil: 0,
     attackStartAt: 0,
     swingDurationMs: undefined,
+    meleeDealt: false,
     charging: false,
     prevHealth: 100,
     chargeKeyDownAt: 0,
@@ -1063,15 +1127,86 @@ const arcadeActionsEl = document.getElementById("arcadeActions");
 const settingsDrawerEl = document.getElementById("settingsDrawer");
 const settingsBackdropEl = document.getElementById("settingsBackdrop");
 
-function showBanner(text) {
+function showBanner(text, durationMs = 1200) {
   const el = document.getElementById("roundBanner");
   el.textContent = text;
   el.classList.remove("hidden");
-  setTimeout(() => el.classList.add("hidden"), 1200);
+  if (showBanner._hideT) {
+    clearTimeout(showBanner._hideT);
+  }
+  showBanner._hideT = setTimeout(() => {
+    el.classList.add("hidden");
+    showBanner._hideT = null;
+  }, durationMs);
 }
 
 function setMatchStatus(text) {
   document.getElementById("matchStatus").textContent = text;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function refreshOnlineLobbyIfOpen() {
+  if (arcadeStep === "online_lobby") renderOnlineLobby();
+}
+
+function renderOnlineLobby() {
+  stepLabelEl.textContent = "Online";
+  arcadeTitleEl.textContent = "Play online";
+  arcadeTextEl.textContent =
+    "Share your match name (say it or text it). Challenge someone in the list — if they’re already hosting with an open red slot, you drop in immediately, even mid-round. Or host first and let them challenge you.";
+  arcadeActionsEl.innerHTML = "";
+
+  const host = document.createElement("button");
+  host.type = "button";
+  host.dataset.action = "lobby_host";
+  host.textContent = "Host match (wait for join)";
+  arcadeActionsEl.appendChild(host);
+
+  const refresh = document.createElement("button");
+  refresh.type = "button";
+  refresh.dataset.action = "lobby_refresh";
+  refresh.textContent = "Refresh list";
+  arcadeActionsEl.appendChild(refresh);
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.dataset.action = "cancelOnline";
+  cancel.textContent = "Disconnect";
+  arcadeActionsEl.appendChild(cancel);
+
+  let extra = `<p class="lobby-share">Your match name: <strong>${escapeHtml(myShareName || "…")}</strong></p>`;
+  extra += `<div class="lobby-section"><h3 class="lobby-h3">Online now</h3>`;
+  const others = lobbyRoster.filter((r) => r.userId !== myLobbyUserId);
+  if (!others.length) {
+    extra += `<p class="lobby-empty">No one else in the lobby. Open a second browser (or ask a friend) and sign in.</p>`;
+  } else {
+    extra += `<ul class="lobby-list">`;
+    for (const row of others) {
+      extra += `<li class="lobby-row"><div class="lobby-row-text"><span class="lobby-name">${escapeHtml(row.shareName)}</span>`;
+      extra += `<span class="lobby-sub">${escapeHtml(row.username)}</span></div>`;
+      extra += `<button type="button" class="lobby-challenge" data-lobby-action="challenge" data-user-id="${escapeHtml(row.userId)}">Challenge</button></li>`;
+    }
+    extra += `</ul>`;
+  }
+  extra += `</div>`;
+  if (pendingInvites.length) {
+    extra += `<div class="lobby-section"><h3 class="lobby-h3">Invites</h3><ul class="lobby-invites">`;
+    for (const inv of pendingInvites) {
+      extra += `<li class="lobby-invite-row"><span class="lobby-invite-from">${escapeHtml(inv.fromShareName)}</span>`;
+      extra += `<button type="button" class="lobby-accept" data-lobby-action="accept" data-room-id="${escapeHtml(inv.roomId)}">Accept</button>`;
+      extra += `<button type="button" class="lobby-decline" data-lobby-action="decline" data-room-id="${escapeHtml(inv.roomId)}">Decline</button></li>`;
+    }
+    extra += `</ul></div>`;
+  }
+  if (arcadeExtraEl) arcadeExtraEl.innerHTML = extra;
+  overlayEl.classList.remove("hidden");
 }
 
 function openSettings() {
@@ -1102,6 +1237,10 @@ function setArcadeStep(step) {
     renderOnlineControlChoice();
     return;
   }
+  if (step === "online_lobby") {
+    renderOnlineLobby();
+    return;
+  }
 
   const steps = {
     welcome: {
@@ -1117,7 +1256,7 @@ function setArcadeStep(step) {
       actions: [
         { id: "single", label: "Single Player" },
         { id: "multi", label: "Local Multiplayer" },
-        { id: "online", label: "Online Matchmaking" },
+        { id: "online", label: "Online (lobby)" },
       ],
     },
     auth: {
@@ -1134,12 +1273,6 @@ function setArcadeStep(step) {
       title: "Ready",
       text: "Launch this round now.",
       actions: [{ id: "launch", label: "Play Round" }],
-    },
-    queueing: {
-      index: "Step 4 of 4",
-      title: "Queueing Online Match",
-      text: "Waiting for an opponent to join...",
-      actions: [{ id: "cancelOnline", label: "Cancel Queue" }],
     },
   };
   const view = steps[step];
@@ -1185,8 +1318,10 @@ function drawMeleeSwingIndicator(p, v, baseY) {
   if (meleeSwordBlit) {
     const bl = meleeSwordBlit;
     const s = Math.max(1.85, 17 / bl.ch) / 13.2;
-    const w = bl.cw * s;
-    const h = bl.ch * s;
+    const duelistSwordMult =
+      p.meleeRangeScale != null && p.meleeRangeScale >= 2 ? 2 : 1;
+    const w = bl.cw * s * duelistSwordMult;
+    const h = bl.ch * s * duelistSwordMult;
     const handX = hx + fac * 8;
     const handY = Math.floor(baseY + 20);
     const ang = (0.52 - swingT) * Math.PI * 0.55;
@@ -1642,6 +1777,87 @@ function rectsOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
+function getPlayerBaseY(p) {
+  return p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
+}
+
+/**
+ * World-space AABB of the visible sword blade for this frame (must match `drawMeleeSwingIndicator`).
+ * Only valid during the same "active" time window as the attack arc. Returns null if no hit window.
+ */
+function getMeleeSwordBladeAabb(attacker, v, tNow) {
+  if (tNow < v.attackStartAt || tNow >= v.attackUntil) return null;
+  const baseY = getPlayerBaseY(attacker);
+  const dur = v.swingDurationMs != null ? v.swingDurationMs : SWING_DURATION_MS;
+  const swingT = (tNow - v.attackStartAt) / Math.max(1, dur);
+  if (swingT < 0.12 || swingT > 0.62) return null;
+  const fac = attacker.facing || 1;
+  const hx = Math.floor(attacker.x + PLAYER_BODY_W * 0.5);
+  if (!meleeSwordBlit) {
+    const mrs = attacker.meleeRangeScale != null ? attacker.meleeRangeScale : 1;
+    const bladeL = 28 * mrs;
+    const ph = 12;
+    const y0 = baseY + 12;
+    if (fac > 0) {
+      return { x: hx + 2, y: y0, w: bladeL, h: ph };
+    }
+    return { x: hx - 2 - bladeL, y: y0, w: bladeL, h: ph };
+  }
+  const bl = meleeSwordBlit;
+  const s = Math.max(1.85, 17 / bl.ch) / 13.2;
+  const duel = attacker.meleeRangeScale != null && attacker.meleeRangeScale >= 2 ? 2 : 1;
+  const w = bl.cw * s * duel;
+  const h = bl.ch * s * duel;
+  const handX = hx + fac * 8;
+  const handY = Math.floor(baseY + 20);
+  const ang = (0.52 - swingT) * Math.PI * 0.55;
+  const c = Math.cos(ang);
+  const sn = Math.sin(ang);
+  function worldFromBlade(lx, ly) {
+    const sx = -fac * lx;
+    const sy = ly;
+    return {
+      x: handX + sx * c - sy * sn,
+      y: handY + sx * sn + sy * c,
+    };
+  }
+  const p0 = worldFromBlade(-w, -h * 0.5);
+  const p1 = worldFromBlade(0, -h * 0.5);
+  const p2 = worldFromBlade(0, h * 0.5);
+  const p3 = worldFromBlade(-w, h * 0.5);
+  const xs = [p0.x, p1.x, p2.x, p3.x];
+  const ys = [p0.y, p1.y, p2.y, p3.y];
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return { x: minX, y: minY, w: Math.max(0.1, maxX - minX), h: Math.max(0.1, maxY - minY) };
+}
+
+/** Once per local tick: melee hits only if blade AABB overlaps defender body. */
+function processMeleeSwordHits() {
+  const tNow = Date.now();
+  for (let ai = 0; ai < 2; ai += 1) {
+    const vA = visualState[ai];
+    if (vA.meleeDealt) continue;
+    if (tNow >= vA.attackUntil || tNow < vA.attackStartAt) continue;
+    const at = localState.players[ai];
+    const dIdx = 1 - ai;
+    const def = localState.players[dIdx];
+    if ((def.x - at.x) * (at.facing || 1) <= 0) continue;
+    const blade = getMeleeSwordBladeAabb(at, vA, tNow);
+    if (!blade) continue;
+    const defRect = { x: def.x, y: getPlayerBaseY(def), w: PLAYER_BODY_W, h: PLAYER_BODY_H };
+    if (rectsOverlap(blade, defRect)) {
+      vA.meleeDealt = true;
+      const mult = at.damageMult != null ? at.damageMult : 1;
+      const dmg = Math.round(10 * mult);
+      def.health = clamp(def.health - dmg, 0, playerMaxHp(def));
+      def.vx = (def.x >= at.x ? 1 : -1) * MELEE_KNOCKBACK_VX;
+    }
+  }
+}
+
 function tryJump(idx, code) {
   if (visualState[idx].charging) return;
   const p = localState.players[idx];
@@ -1663,24 +1879,13 @@ function tryJump(idx, code) {
 }
 
 function doMelee(attackerIdx) {
-  const defenderIdx = attackerIdx === 0 ? 1 : 0;
   const attacker = localState.players[attackerIdx];
-  const defender = localState.players[defenderIdx];
   const dur = Math.round(SWING_DURATION_MS * (attacker.meleeSwingScale != null ? attacker.meleeSwingScale : 1));
   const t0 = Date.now();
   visualState[attackerIdx].attackStartAt = t0;
   visualState[attackerIdx].attackUntil = t0 + dur;
   visualState[attackerIdx].swingDurationMs = dur;
-  const r = MELEE_RANGE * (attacker.meleeRangeScale != null ? attacker.meleeRangeScale : 1);
-  const inRange = Math.abs(attacker.x - defender.x) <= r;
-  const facingToward = (defender.x - attacker.x) * attacker.facing > 0;
-  if (inRange && facingToward) {
-    const mult = attacker.damageMult != null ? attacker.damageMult : 1;
-    const dmg = Math.round(10 * mult);
-    defender.health = clamp(defender.health - dmg, 0, playerMaxHp(defender));
-    const push = defender.x >= attacker.x ? 1 : -1;
-    defender.vx = push * MELEE_KNOCKBACK_VX;
-  }
+  visualState[attackerIdx].meleeDealt = false;
 }
 
 function triggerSwing(idx) {
@@ -1690,6 +1895,7 @@ function triggerSwing(idx) {
   visualState[idx].attackStartAt = t0;
   visualState[idx].attackUntil = t0 + dur;
   visualState[idx].swingDurationMs = dur;
+  visualState[idx].meleeDealt = false;
 }
 
 function computeChargedShot(heldMs) {
@@ -1709,6 +1915,7 @@ function computeChargedShot(heldMs) {
  * @param {number | { damage: number, w?: number, h?: number, speed?: number } | null} override - null = use current charge hold
  */
 function fireProjectile(attackerIdx, override = null) {
+  if (Date.now() < roundLockUntil) return;
   const attacker = localState.players[attackerIdx];
   const orbCost = attacker.tripleShot ? 3 : 1;
   const ammo = attacker.orbAmmo != null ? attacker.orbAmmo : ORB_AMMO_PER_ROUND;
@@ -1796,6 +2003,58 @@ function healPlayerToCap(p) {
   p.health = playerMaxHp(p);
 }
 
+function isTypingInFormField() {
+  const el = document.activeElement;
+  if (!el || !(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return el.isContentEditable;
+}
+
+function keyCodeToCheatDigit(code) {
+  if (typeof code !== "string") return null;
+  if (code.startsWith("Digit") && code.length === 6) return code.slice(5);
+  if (code.startsWith("Numpad") && code.length === 7) {
+    const d = code.slice(6);
+    if (d >= "0" && d <= "9") return d;
+  }
+  return null;
+}
+
+function applyRedThousandHpCheat() {
+  cheatRedThousandHp = true;
+  if (mode !== "online" && localState.players[1]) {
+    const p = localState.players[1];
+    p.maxHealth = CHEAT_RED_MAX_HP;
+    healPlayerToCap(p);
+  }
+  showBanner("Red — 1000 HP", 2000);
+}
+
+/**
+ * Call from global keydown (before game / buff handlers). Digits only extend the buffer.
+ */
+function tryRedThousandHpCheatFromKeydown(e) {
+  if (cheatRedThousandHp) return;
+  if (remapState.active) return;
+  if (e.repeat) return;
+  if (isTypingInFormField()) return;
+  const d = keyCodeToCheatDigit(e.code);
+  if (!d) return;
+  cheatRedDigitBuffer = (cheatRedDigitBuffer + d).slice(-4);
+  if (cheatRedDigitBuffer === "2017") {
+    cheatRedDigitBuffer = "";
+    applyRedThousandHpCheat();
+  }
+}
+
+function syncRedThousandHpAfterLocalReset() {
+  if (!cheatRedThousandHp || mode === "online" || !localState.players[1]) return;
+  const p = localState.players[1];
+  p.maxHealth = CHEAT_RED_MAX_HP;
+  healPlayerToCap(p);
+}
+
 let buffAutoPickTimer = null;
 let buffPickGateTimer = null;
 
@@ -1847,6 +2106,10 @@ function applyBuffChoice(buffId) {
   hideBuffPickOverlay();
   roundIntermissionStartAt = Date.now();
   roundLockUntil = Date.now() + ROUND_INTERMISSION_MS;
+  localState.players[0].chargeStartAt = 0;
+  localState.players[1].chargeStartAt = 0;
+  visualState[0].charging = false;
+  visualState[1].charging = false;
 }
 
 function showBuffPickOverlay(loserIdx) {
@@ -2014,6 +2277,8 @@ function updateLocalGame() {
     }
   }
 
+  processMeleeSwordHits();
+
   localState.projectiles.forEach((shot) => {
     shot.x += shot.vx;
     shot.y += shot.vy ?? 0;
@@ -2046,14 +2311,19 @@ function updateLocalGame() {
     const winner = p1.health <= 0 ? 1 : 0;
     const loser = winner === 0 ? 1 : 0;
     localState.players[winner].score += 1;
-    showBanner(`${winner === 0 ? "Blue" : "Red"} wins round`);
-    localState.round += 1;
-    if (localState.round > 10) {
-      showBanner("Match reset");
+    const winName = winner === 0 ? "Blue" : "Red";
+    const matchOver =
+      p1.score >= WINS_TO_END_MATCH || p2.score >= WINS_TO_END_MATCH;
+    if (matchOver) {
+      showBanner(`${winName} wins the match!`, 3200);
       localState.round = 1;
       p1.score = 0;
       p2.score = 0;
       clearCombatBuffsFromPlayers();
+      syncRedThousandHpAfterLocalReset();
+    } else {
+      showBanner(`${winName} wins round`);
+      localState.round += 1;
     }
     healPlayerToCap(p1);
     healPlayerToCap(p2);
@@ -2067,9 +2337,14 @@ function updateLocalGame() {
     p1.orbAmmo = ORB_AMMO_PER_ROUND;
     p2.orbAmmo = ORB_AMMO_PER_ROUND;
     localState.projectiles = [];
-    localState.buffPickLoser = loser;
-    localState.buffPickActive = true;
-    showBuffPickOverlay(loser);
+    if (!matchOver) {
+      localState.buffPickLoser = loser;
+      localState.buffPickActive = true;
+      showBuffPickOverlay(loser);
+    } else {
+      localState.buffPickActive = false;
+      hideBuffPickOverlay();
+    }
   }
 }
 
@@ -2118,14 +2393,52 @@ function setupSocket() {
     return;
   }
   if (socket) socket.disconnect();
+  pendingInvites = [];
+  lobbyRoster = [];
+  myShareName = "";
+  myLobbyUserId = "";
   socket = io({
     auth: { token: profile.token },
   });
 
   socket.on("connect", () => {
-    setMatchStatus("Connected. Queueing...");
-    socket.emit("queue:join");
-    setArcadeStep("queueing");
+    setMatchStatus("Online — pick someone to challenge or host a match.");
+    socket.emit("lobby:list");
+    setArcadeStep("online_lobby");
+  });
+
+  socket.on("lobby:players", (list) => {
+    lobbyRoster = Array.isArray(list) ? list : [];
+    refreshOnlineLobbyIfOpen();
+  });
+
+  socket.on("lobby:self", (me) => {
+    myShareName = me.shareName || "";
+    myLobbyUserId = me.userId || "";
+    refreshOnlineLobbyIfOpen();
+  });
+
+  socket.on("invite:incoming", (inv) => {
+    pendingInvites = pendingInvites.filter((x) => x.roomId !== inv.roomId);
+    pendingInvites.push({
+      roomId: inv.roomId,
+      fromShareName: inv.fromShareName,
+      fromUserId: inv.fromUserId,
+    });
+    if (arcadeStep === "online_lobby") {
+      refreshOnlineLobbyIfOpen();
+      showBanner(`Invite from ${inv.fromShareName}`);
+    } else {
+      const ok = window.confirm(`${inv.fromShareName} invited you to a match. Accept?`);
+      if (ok) {
+        socket.emit("invite:accept", { roomId: inv.roomId });
+      }
+      pendingInvites = pendingInvites.filter((x) => x.roomId !== inv.roomId);
+    }
+  });
+
+  socket.on("game:error", (p) => {
+    showBanner(p.message || "Something went wrong");
   });
 
   socket.on("match:start", (payload) => {
@@ -2133,8 +2446,8 @@ function setupSocket() {
     playerIndex = payload.playerIndex;
     socket.emit("match:join", { roomId });
     mode = "online";
-    showBanner("Online match started");
-    setMatchStatus(`Online match: ${roomId.slice(0, 8)}`);
+    showBanner(playerIndex === 0 ? "You’re blue (host)" : "You’re red — fight!");
+    setMatchStatus(`Online · ${roomId.slice(0, 8)}…`);
     hideArcadeOverlay();
   });
 
@@ -2154,7 +2467,9 @@ function setupSocket() {
   socket.on("match:end", ({ reason }) => {
     setMatchStatus(reason);
     showBanner(reason);
+    roomId = null;
     mode = "single";
+    pendingInvites = [];
     setArcadeStep("mode");
   });
 }
@@ -2210,6 +2525,7 @@ function localReset() {
     attackUntil: 0,
     attackStartAt: 0,
     swingDurationMs: undefined,
+    meleeDealt: false,
     charging: false,
     prevHealth: 100,
     chargeKeyDownAt: 0,
@@ -2221,12 +2537,14 @@ function localReset() {
     attackUntil: 0,
     attackStartAt: 0,
     swingDurationMs: undefined,
+    meleeDealt: false,
     charging: false,
     prevHealth: 100,
     chargeKeyDownAt: 0,
     shootFlashUntil: 0,
     prevDrawX: undefined,
   };
+  syncRedThousandHpAfterLocalReset();
 }
 
 function onlineIntermissionActive() {
@@ -2234,6 +2552,7 @@ function onlineIntermissionActive() {
 }
 
 window.addEventListener("keydown", (e) => {
+  tryRedThousandHpCheatFromKeydown(e);
   if (remapState.active) {
     return;
   }
@@ -2263,19 +2582,23 @@ window.addEventListener("keydown", (e) => {
       doMelee(1);
     }
     if (e.code === p0FireKey() && !visualState[0].charging) {
-      const p0 = localState.players[0];
-      const a0 = p0.orbAmmo != null ? p0.orbAmmo : ORB_AMMO_PER_ROUND;
-      if (p0.infiniteAmmo || a0 > 0) {
-        p0.chargeStartAt = Date.now();
-        visualState[0].charging = true;
+      if (Date.now() >= roundLockUntil) {
+        const p0 = localState.players[0];
+        const a0 = p0.orbAmmo != null ? p0.orbAmmo : ORB_AMMO_PER_ROUND;
+        if (p0.infiniteAmmo || a0 > 0) {
+          p0.chargeStartAt = Date.now();
+          visualState[0].charging = true;
+        }
       }
     }
     if (mode === "multi" && e.code === p1FireKey() && !visualState[1].charging) {
-      const pr = localState.players[1];
-      const a1 = pr.orbAmmo != null ? pr.orbAmmo : ORB_AMMO_PER_ROUND;
-      if (pr.infiniteAmmo || a1 > 0) {
-        pr.chargeStartAt = Date.now();
-        visualState[1].charging = true;
+      if (Date.now() >= roundLockUntil) {
+        const pr = localState.players[1];
+        const a1 = pr.orbAmmo != null ? pr.orbAmmo : ORB_AMMO_PER_ROUND;
+        if (pr.infiniteAmmo || a1 > 0) {
+          pr.chargeStartAt = Date.now();
+          visualState[1].charging = true;
+        }
       }
     }
   }
@@ -2306,16 +2629,18 @@ window.addEventListener("keyup", (e) => {
   keys.delete(e.code);
   if (mode !== "online") {
     if (e.code === p0FireKey()) {
+      const wasCharging = visualState[0].charging;
       const heldMs = Date.now() - localState.players[0].chargeStartAt;
       visualState[0].charging = false;
-      if (heldMs >= CHARGE_THRESHOLD_MS) {
+      if (wasCharging && heldMs >= CHARGE_THRESHOLD_MS) {
         fireProjectile(0);
       }
     }
     if (mode === "multi" && e.code === p1FireKey()) {
+      const wasCharging = visualState[1].charging;
       const heldMs = Date.now() - localState.players[1].chargeStartAt;
       visualState[1].charging = false;
-      if (heldMs >= CHARGE_THRESHOLD_MS) {
+      if (wasCharging && heldMs >= CHARGE_THRESHOLD_MS) {
         fireProjectile(1);
       }
     }
@@ -2426,9 +2751,12 @@ function setupUI() {
   });
 
   arcadeActionsEl.addEventListener("click", (e) => {
-    const t = e.target && e.target.closest ? e.target.closest("[data-action]") : null;
-    const action = t && t.dataset ? t.dataset.action : e.target?.dataset?.action;
+    const from = e.target instanceof Element ? e.target : null;
+    const t = from && typeof from.closest === "function" ? from.closest("[data-action]") : null;
+    const action = t && t.dataset ? t.dataset.action : from?.dataset?.action;
     if (!action) return;
+    e.preventDefault();
+    e.stopPropagation();
     if (action === "next") setArcadeStep("mode");
     if (action === "single") {
       mode = "single";
@@ -2491,8 +2819,45 @@ function setupUI() {
       socket = null;
       roomId = null;
       mode = "single";
-      setMatchStatus("Online queue cancelled.");
+      pendingInvites = [];
+      lobbyRoster = [];
+      myShareName = "";
+      myLobbyUserId = "";
+      setMatchStatus("Disconnected from online.");
       setArcadeStep("mode");
+    }
+    if (action === "lobby_host") {
+      if (socket) socket.emit("room:create");
+    }
+    if (action === "lobby_refresh") {
+      if (socket) socket.emit("lobby:list");
+    }
+  });
+
+  overlayEl.addEventListener("click", (e) => {
+    const from = e.target instanceof Element ? e.target : null;
+    const btn = from && typeof from.closest === "function" ? from.closest("[data-lobby-action]") : null;
+    if (!btn || !socket) return;
+    const act = btn.getAttribute("data-lobby-action");
+    if (act === "challenge") {
+      const uid = btn.getAttribute("data-user-id");
+      if (uid) {
+        socket.emit("invite:send", { targetUserId: uid });
+        showBanner("Challenge sent");
+      }
+    }
+    if (act === "accept") {
+      const rid = btn.getAttribute("data-room-id");
+      if (rid) {
+        socket.emit("invite:accept", { roomId: rid });
+        pendingInvites = pendingInvites.filter((x) => x.roomId !== rid);
+        refreshOnlineLobbyIfOpen();
+      }
+    }
+    if (act === "decline") {
+      const rid = btn.getAttribute("data-room-id");
+      pendingInvites = pendingInvites.filter((x) => x.roomId !== rid);
+      refreshOnlineLobbyIfOpen();
     }
   });
 
@@ -2512,13 +2877,16 @@ function setupUI() {
 
 async function boot() {
   loadKeyBindings();
-  await loadProfileFromServer();
-  document.getElementById("usernameInput").value = profile.username;
-  document.getElementById("emailInput").value = profile.email;
-  renderFriends();
+  /* Interactive arcade before profile fetch — was awaiting and blocking `setupUI` + controls. */
   setupUI();
   setArcadeStep("welcome");
   render();
+  await loadProfileFromServer();
+  const usernameInput = document.getElementById("usernameInput");
+  if (usernameInput) usernameInput.value = profile.username;
+  const emailInput = document.getElementById("emailInput");
+  if (emailInput) emailInput.value = profile.email;
+  renderFriends();
 }
 
 boot();
