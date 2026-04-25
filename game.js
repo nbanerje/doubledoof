@@ -1182,7 +1182,7 @@ function escapeHtml(s) {
 }
 
 function refreshOnlineLobbyIfOpen() {
-  if (arcadeStep === "online_lobby") renderOnlineLobby();
+  if (arcadeStep === "online_lobby" && !roomId) renderOnlineLobby();
 }
 
 function renderOnlineLobby() {
@@ -2511,6 +2511,7 @@ function setupSocket() {
 
   socket.on("match:start", (payload) => {
     roomId = payload.roomId;
+    arcadeStep = "in_match";
     playerIndex = payload.playerIndex;
     socket.emit("match:join", { roomId });
     mode = "online";
