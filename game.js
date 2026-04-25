@@ -177,6 +177,11 @@ function drawHudOnView() {
     50,
     "rgba(228,235,255,0.95)"
   );
+  if (mode === "online" && playerIndex === 0 && myShareName) {
+    vc.textAlign = "center";
+    vc.font = HUD_FONT_MAIN;
+    hudStrokeFillText(vc, `Host code: ${myShareName}`, VIEW_W / 2, 72, "#7ec8ff");
+  }
   vc.textAlign = "left";
   if (overlayEl.classList.contains("hidden") && !localState.buffPickActive) {
     drawRoundIntermissionHud(vc);
