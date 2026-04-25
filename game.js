@@ -1218,13 +1218,11 @@ const touchState = {
   enabled: isTouchDevice,
   left: false,
   right: false,
-  jump: false,
   jumpFromStick: false,
   attack: false,
   orb: false,
   prevLeft: false,
   prevRight: false,
-  prevJump: false,
   prevJumpFromStick: false,
   prevAttack: false,
   prevOrb: false,
@@ -1235,7 +1233,7 @@ function onlineControlsFromInput() {
   return {
     left: keys.has(ok.left) || touchState.left,
     right: keys.has(ok.right) || touchState.right,
-    jump: keys.has(ok.jump) || touchState.jump || touchState.jumpFromStick,
+    jump: keys.has(ok.jump) || touchState.jumpFromStick,
   };
 }
 
@@ -1748,14 +1746,13 @@ function applyTouchInput() {
   if (!touchState.enabled || remapState.active || localState.buffPickActive || !overlayEl.classList.contains("hidden")) {
     touchState.prevLeft = touchState.left;
     touchState.prevRight = touchState.right;
-    touchState.prevJump = touchState.jump;
     touchState.prevJumpFromStick = touchState.jumpFromStick;
     touchState.prevAttack = touchState.attack;
     touchState.prevOrb = touchState.orb;
     return;
   }
-  const jumpNow = touchState.jump || touchState.jumpFromStick;
-  const jumpPrev = touchState.prevJump || touchState.prevJumpFromStick;
+  const jumpNow = touchState.jumpFromStick;
+  const jumpPrev = touchState.prevJumpFromStick;
 
   if (mode !== "online") {
     const b0 = keyBindings.p0;
@@ -1806,7 +1803,6 @@ function applyTouchInput() {
 
   touchState.prevLeft = touchState.left;
   touchState.prevRight = touchState.right;
-  touchState.prevJump = touchState.jump;
   touchState.prevJumpFromStick = touchState.jumpFromStick;
   touchState.prevAttack = touchState.attack;
   touchState.prevOrb = touchState.orb;
@@ -2169,13 +2165,11 @@ function resetInputState() {
   keys.clear();
   touchState.left = false;
   touchState.right = false;
-  touchState.jump = false;
   touchState.jumpFromStick = false;
   touchState.attack = false;
   touchState.orb = false;
   touchState.prevLeft = false;
   touchState.prevRight = false;
-  touchState.prevJump = false;
   touchState.prevJumpFromStick = false;
   touchState.prevAttack = false;
   touchState.prevOrb = false;
@@ -2972,7 +2966,6 @@ function setupUI() {
     const applyTouchAction = (action, pressed) => {
       if (action === "left") touchState.left = pressed;
       if (action === "right") touchState.right = pressed;
-      if (action === "jump") touchState.jump = pressed;
       if (action === "attack") touchState.attack = pressed;
       if (action === "orb") touchState.orb = pressed;
     };

@@ -5,7 +5,9 @@
 html,
 body {
   width: 100%;
+  height: 100%;
   min-height: 100%;
+  overflow: hidden;
   overscroll-behavior: none;
 }
 
@@ -20,6 +22,7 @@ body {
 .app {
   position: relative;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 14px;
 }
 
@@ -87,6 +90,10 @@ button {
   padding: 8px 10px;
   background: #1d2640;
   color: #f1f5ff;
+}
+
+input {
+  font-size: 16px;
 }
 
 button {
@@ -755,21 +762,59 @@ button.lobby-decline {
 
 @media (max-width: 768px) {
   .app {
-    padding: 8px;
+    width: 100dvw;
+    height: 100dvh;
+    min-height: 100dvh;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
   }
 
   .game-wrap {
-    width: 100%;
-    min-height: auto;
-    align-items: flex-start;
+    width: min(100dvw, calc(100dvh * 1.677419));
+    height: min(100dvh, calc(100dvw / 1.677419));
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
   }
 
   #gameCanvas {
-    width: min(100%, calc((100dvh - 110px) * 1.677));
+    width: 100%;
     max-width: 100%;
-    height: auto;
-    max-height: calc(100dvh - 110px);
-    margin: 0 auto;
-    border-radius: 10px;
+    height: 100%;
+    max-height: 100%;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .settings-toggle {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+  }
+
+  .touch-overlay {
+    padding:
+      8px max(10px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+  }
+}
+
+@media (max-width: 768px) and (orientation: landscape) {
+  .touch-joystick {
+    width: min(92px, 24dvh);
+    height: min(92px, 24dvh);
+  }
+
+  .touch-stick {
+    width: min(42px, 11dvh);
+    height: min(42px, 11dvh);
+  }
+
+  .touch-btn {
+    min-width: min(92px, 22dvw);
+    min-height: min(52px, 15dvh);
+    padding: 6px 10px;
   }
 }
