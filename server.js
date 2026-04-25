@@ -44,7 +44,12 @@ const CHARGE_AIR_GRAVITY_MULT = 0.26;
 const JUMP_VELOCITY = -12.5;
 const POWER_BUFF_DAMAGE_MULT = 1.35;
 const TANK_BUFF_MAX_HP = 130;
-const BUFF_POOL = ["triple", "tank", "power", "infiniteJumps", "infiniteAmmo", "instantMaxCharge", "meleeLong"];
+const BUFF_POOL = ["triple", "tank", "power", "infiniteJumps", "infiniteAmmo", "instantMaxCharge", "meleeLong", "fireBreath"];
+const FIRE_BREATH_RANGE = PLAYER_BODY_W * 1.5;
+const FIRE_BREATH_H = 20;
+const FIRE_BREATH_TICK_MS = 100;
+const FIRE_BREATH_BASE_DAMAGE = 3;
+const FIRE_BREATH_SLOW_MULT = 0.42;
 const LEVEL_PLATFORMS = [
   [
     { x: 140, y: 490, w: 180, h: 14 },
@@ -108,13 +113,46 @@ const LEVEL_PLATFORMS = [
   ],
 ];
 
-function currentPlatformsForRound(round) {
-  const idx = (Math.max(1, round) - 1) % LEVEL_PLATFORMS.length;
+function normalizeLevelIndex(idx) {
+  return Math.max(0, Number.isInteger(idx) ? idx : 0) % LEVEL_PLATFORMS.length;
+}
+
+function nextLevelIndex(currentIdx) {
+  if (LEVEL_PLATFORMS.length <= 1) return 0;
+  const cur = normalizeLevelIndex(currentIdx);
+  return (cur + 1 + Math.floor(Math.random() * (LEVEL_PLATFORMS.length - 1))) % LEVEL_PLATFORMS.length;
+}
+
+function currentPlatformsForLevelIndex(levelIndex) {
+  const idx = normalizeLevelIndex(levelIndex);
   return LEVEL_PLATFORMS[idx];
 }
 
 function rectsOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function fireBreathRectForPlayer(p) {
+  const fac = p.facing || 1;
+  const x = fac > 0 ? p.x + PLAYER_BODY_W : p.x - FIRE_BREATH_RANGE;
+  return {
+    x,
+    y: p.y + Math.floor(PLAYER_BODY_H * 0.32),
+    w: FIRE_BREATH_RANGE,
+    h: FIRE_BREATH_H,
+  };
+}
+
+function playerInEnemyFire(room, idx) {
+  const p = room.players[idx];
+  const enemy = room.players[idx === 0 ? 1 : 0];
+  if (!p || !enemy?.fireBreathing) return false;
+  return rectsOverlap(fireBreathRectForPlayer(enemy), {
+    x: p.x,
+    y: p.y,
+    w: PLAYER_BODY_W,
+    h: PLAYER_BODY_H,
+  });
 }
 
 function chargedShotFromHeldMs(heldMs) {
@@ -155,6 +193,7 @@ function applyBuffToPlayerOnline(player, buffId) {
   else if (buffId === "infiniteAmmo") player.infiniteAmmo = true;
   else if (buffId === "instantMaxCharge") player.instantMaxCharge = true;
   else if (buffId === "meleeLong") player.meleeRangeScale = 2;
+  else if (buffId === "fireBreath") player.fireBreath = true;
   player.health = playerMaxHp(player);
 }
 const DB_URL = process.env.DB_URL || process.env.DATABASE_URL;
@@ -279,6 +318,7 @@ function createHostRoom(hostUserId, hostSocketId) {
   rooms.set(roomId, {
     id: roomId,
     round: 1,
+    levelIndex: 0,
     players,
     projectiles: [],
     lockUntil: 0,
@@ -538,7 +578,7 @@ app.get("/api/health", (_, res) => {
 
 function updateRoom(room) {
   const now = Date.now();
-  const platforms = currentPlatformsForRound(room.round);
+  const platforms = currentPlatformsForLevelIndex(room.levelIndex);
   if (room.buffPickActive) {
     if (!room.buffPickInputUnlocked && now >= room.buffUnlockAt) {
       room.buffPickInputUnlocked = true;
@@ -547,7 +587,8 @@ function updateRoom(room) {
   }
   if (room.lockUntil > now) return;
 
-  for (const p of room.players) {
+  for (let pi = 0; pi < room.players.length; pi += 1) {
+    const p = room.players[pi];
     if (!p.infiniteAmmo) {
       const ammo = p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND;
       if (ammo < ORB_AMMO_PER_ROUND) {
@@ -561,16 +602,19 @@ function updateRoom(room) {
     const left = !!p.controls.left;
     const right = !!p.controls.right;
     const jump = !!p.controls.jump;
+    const moveSpeed = 4 * (playerInEnemyFire(room, pi) ? FIRE_BREATH_SLOW_MULT : 1);
     p.vx = 0;
-    if (left && !right) {
-      p.vx = -4;
+    if (p.fireBreathing) {
+      p.vx = 0;
+    } else if (left && !right) {
+      p.vx = -moveSpeed;
       p.facing = -1;
     }
-    if (right && !left) {
-      p.vx = 4;
+    if (!p.fireBreathing && right && !left) {
+      p.vx = moveSpeed;
       p.facing = 1;
     }
-    if (jump && !p.jumpHeld) {
+    if (!p.fireBreathing && jump && !p.jumpHeld) {
       if (p.infiniteJumps) {
         p.vy = JUMP_VELOCITY;
         p.onGround = false;
@@ -615,6 +659,25 @@ function updateRoom(room) {
 
   const p0 = room.players[0];
   const p1 = room.players[1];
+
+  for (let ai = 0; ai < 2; ai += 1) {
+    const at = room.players[ai];
+    const def = room.players[ai === 0 ? 1 : 0];
+    if (!at.fireBreathing || !def) continue;
+    if (!at.fireNextDamageAt || at.fireNextDamageAt < now - FIRE_BREATH_TICK_MS * 4) {
+      at.fireNextDamageAt = now;
+    }
+    const flame = fireBreathRectForPlayer(at);
+    const defRect = { x: def.x, y: def.y, w: PLAYER_BODY_W, h: PLAYER_BODY_H };
+    while (at.fireNextDamageAt <= now) {
+      if (rectsOverlap(flame, defRect)) {
+        const heldMs = Math.max(0, at.fireNextDamageAt - (at.fireStartAt || at.fireNextDamageAt));
+        const dmg = FIRE_BREATH_BASE_DAMAGE + Math.floor(heldMs / 1000);
+        def.health = Math.max(0, def.health - dmg);
+      }
+      at.fireNextDamageAt += FIRE_BREATH_TICK_MS;
+    }
+  }
 
   room.projectiles.forEach((shot) => {
     shot.x += shot.vx;
@@ -664,6 +727,7 @@ function updateRoom(room) {
     } else {
       room.round += 1;
     }
+    room.levelIndex = nextLevelIndex(room.levelIndex);
     room.intermissionStartedAt = Date.now();
     p0.health = playerMaxHp(p0);
     p1.health = playerMaxHp(p1);
@@ -685,6 +749,9 @@ function updateRoom(room) {
     room.players.forEach((p) => {
       p.charging = false;
       p.chargeStart = 0;
+      p.fireBreathing = false;
+      p.fireStartAt = 0;
+      p.fireNextDamageAt = 0;
     });
     if (s0 < WINS_TO_END_MATCH && s1 < WINS_TO_END_MATCH) {
       const pick = pickRandomBuffTripletServer(room.buffLastOfferedKey);
@@ -706,6 +773,7 @@ setInterval(() => {
     updateRoom(room);
     io.to(room.id).emit("match:state", {
       round: room.round,
+      levelIndex: normalizeLevelIndex(room.levelIndex),
       players: room.players.map((p) => ({
         id: p.id,
         x: p.x,
@@ -716,6 +784,9 @@ setInterval(() => {
         score: p.score,
         color: p.color,
         charging: p.charging,
+        fireBreath: !!p.fireBreath,
+        fireBreathing: !!p.fireBreathing,
+        fireStartAt: p.fireStartAt || 0,
         orbAmmo: p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND,
       })),
       projectiles: room.projectiles,
@@ -924,6 +995,7 @@ io.on("connection", (socket) => {
         }
       }
       if (payload.action === "chargeStart") {
+        if (player.fireBreathing) return;
         player.charging = true;
         player.chargeStart = Date.now();
       }
@@ -968,6 +1040,16 @@ io.on("connection", (socket) => {
           player.lastShotAt = Date.now();
         }
         player.charging = false;
+      }
+      if (payload.action === "fireStart" && player.fireBreath) {
+        player.fireBreathing = true;
+        player.fireStartAt = Date.now();
+        player.fireNextDamageAt = Date.now();
+        player.charging = false;
+        player.vx = 0;
+      }
+      if (payload.action === "fireEnd") {
+        player.fireBreathing = false;
       }
     });
 

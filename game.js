@@ -284,6 +284,7 @@ const BUFF_POOL = [
   "infiniteAmmo",
   "instantMaxCharge",
   "meleeLong",
+  "fireBreath",
 ];
 const BUFF_DEFS = {
   triple: { name: "Triple shot", desc: "Each charged release fires 3 orbs" },
@@ -293,6 +294,7 @@ const BUFF_DEFS = {
   infiniteAmmo: { name: "Bottomless", desc: "Infinite orb ammo" },
   instantMaxCharge: { name: "Overcharge", desc: "Shots are always full tier V" },
   meleeLong: { name: "Duelist", desc: "Melee range and swing 2× longer" },
+  fireBreath: { name: "Fire Breath", desc: "Hold a mapped key to breathe scaling fire" },
 };
 
 function shuffleInPlace(a) {
@@ -370,6 +372,11 @@ const SWING_DURATION_MS = 200;
 const MELEE_RANGE = 48;
 /** Horizontal push on defender when melee connects */
 const MELEE_KNOCKBACK_VX = 50;
+const FIRE_BREATH_RANGE = PLAYER_BODY_W * 1.5;
+const FIRE_BREATH_H = 20;
+const FIRE_BREATH_TICK_MS = 100;
+const FIRE_BREATH_BASE_DAMAGE = 3;
+const FIRE_BREATH_SLOW_MULT = 0.42;
 const DEFAULT_MAX_HP = 100;
 const TANK_BUFF_MAX_HP = 130;
 /** A match ends as soon as one side reaches this many round wins. */
@@ -590,6 +597,7 @@ function defaultKeyBindings() {
       melee: "Space",
       charge: "KeyS",
       attack: "KeyS",
+      fire: "",
     },
     p1: {
       left: "ArrowLeft",
@@ -598,6 +606,7 @@ function defaultKeyBindings() {
       melee: "Comma",
       charge: "ArrowDown",
       attack: "ArrowDown",
+      fire: "",
     },
     online: {
       left: "KeyA",
@@ -605,6 +614,7 @@ function defaultKeyBindings() {
       jump: "KeyW",
       melee: "KeyF",
       orb: "KeyS",
+      fire: "",
     },
   };
 }
@@ -625,10 +635,13 @@ function loadKeyBindings() {
     };
     if (!keyBindings.p1.melee) keyBindings.p1.melee = def.p1.melee;
     if (!keyBindings.p1.charge) keyBindings.p1.charge = def.p1.charge;
+    if (keyBindings.p0.fire == null) keyBindings.p0.fire = def.p0.fire;
+    if (keyBindings.p1.fire == null) keyBindings.p1.fire = def.p1.fire;
     keyBindings.p0.attack = keyBindings.p0.charge;
     keyBindings.p1.attack = keyBindings.p1.charge;
     if (!keyBindings.online.melee) keyBindings.online.melee = def.online.melee;
     if (!keyBindings.online.orb) keyBindings.online.orb = keyBindings.online.attack || def.online.orb;
+    if (keyBindings.online.fire == null) keyBindings.online.fire = def.online.fire;
   } catch (_) {
     /* ignore */
   }
@@ -654,17 +667,20 @@ function bindingCodesFlat() {
   add(p0.melee);
   add(p0.charge);
   add(p0.attack);
+  add(p0.fire);
   add(p1.left);
   add(p1.right);
   add(p1.jump);
   add(p1.melee);
   add(p1.charge);
   add(p1.attack);
+  add(p1.fire);
   add(online.left);
   add(online.right);
   add(online.jump);
   add(online.melee);
   add(online.orb);
+  add(online.fire);
   return s;
 }
 
@@ -1068,7 +1084,14 @@ function getLevelForRound(round) {
   return LEVELS[(Math.max(1, round) - 1) % LEVELS.length];
 }
 
+function nextLevelIndex(currentIdx) {
+  if (LEVELS.length <= 1) return 0;
+  const cur = Number.isInteger(currentIdx) ? currentIdx : 0;
+  return (cur + 1 + Math.floor(Math.random() * (LEVELS.length - 1))) % LEVELS.length;
+}
+
 function currentLevel() {
+  if (Number.isInteger(localState.levelIndex)) return LEVELS[localState.levelIndex % LEVELS.length];
   return getLevelForRound(localState.round);
 }
 
@@ -1153,6 +1176,7 @@ function syncPlayerRenderPrev(idx, x) {
 }
 let localState = {
   round: 1,
+  levelIndex: 0,
   players: [
     {
       x: 220,
@@ -1221,11 +1245,13 @@ const touchState = {
   jumpFromStick: false,
   attack: false,
   orb: false,
+  fire: false,
   prevLeft: false,
   prevRight: false,
   prevJumpFromStick: false,
   prevAttack: false,
   prevOrb: false,
+  prevFire: false,
 };
 
 function onlineControlsFromInput() {
@@ -1242,6 +1268,9 @@ function refreshTouchOverlayVisibility() {
   const visible =
     touchState.enabled && overlayEl.classList.contains("hidden") && !settingsDrawerEl.classList.contains("open");
   touchOverlayEl.classList.toggle("hidden", !visible);
+  const fireBtn = touchOverlayEl.querySelector('[data-touch-action="fire"]');
+  const localPlayer = mode === "online" ? localState.players[playerIndex] : localState.players[0];
+  if (fireBtn) fireBtn.classList.toggle("hidden", !visible || !localPlayer?.fireBreath);
 }
 
 function showBanner(text, durationMs = 1200) {
@@ -1733,6 +1762,7 @@ function render() {
   drawPlatforms();
   drawPixelGroundStrip();
   localState.projectiles.forEach(drawProjectile);
+  localState.players.forEach(drawFireBreath);
   localState.players.forEach(drawPlayer);
   if (overlayEl.classList.contains("hidden")) {
     localState.players.forEach((p, i) => drawChargeOrb(p, i));
@@ -1749,6 +1779,7 @@ function applyTouchInput() {
     touchState.prevJumpFromStick = touchState.jumpFromStick;
     touchState.prevAttack = touchState.attack;
     touchState.prevOrb = touchState.orb;
+    touchState.prevFire = touchState.fire;
     return;
   }
   const jumpNow = touchState.jumpFromStick;
@@ -1780,6 +1811,8 @@ function applyTouchInput() {
         fireProjectile(0);
       }
     }
+    if (touchState.fire && !touchState.prevFire) startFireBreathLocal(0);
+    if (!touchState.fire && touchState.prevFire) stopFireBreathLocal(0);
   } else if (socket && roomId) {
     const controls = onlineControlsFromInput();
     if (touchState.left !== touchState.prevLeft || touchState.right !== touchState.prevRight) {
@@ -1799,6 +1832,12 @@ function applyTouchInput() {
       triggerSwing(playerIndex);
       socket.emit("match:input", { action: "chargeRelease", controls });
     }
+    if (touchState.fire && !touchState.prevFire && !onlineIntermissionActive()) {
+      socket.emit("match:input", { action: "fireStart", controls });
+    }
+    if (!touchState.fire && touchState.prevFire) {
+      socket.emit("match:input", { action: "fireEnd", controls });
+    }
   }
 
   touchState.prevLeft = touchState.left;
@@ -1806,6 +1845,7 @@ function applyTouchInput() {
   touchState.prevJumpFromStick = touchState.jumpFromStick;
   touchState.prevAttack = touchState.attack;
   touchState.prevOrb = touchState.orb;
+  touchState.prevFire = touchState.fire;
 }
 
 /** Horizontal stepped sky (no smooth gradients) for pixel look. */
@@ -1945,6 +1985,52 @@ function drawPlatforms() {
   });
 }
 
+function fireBreathRectForPlayer(p) {
+  const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
+  const fac = p.facing || 1;
+  const x = fac > 0 ? p.x + PLAYER_BODY_W : p.x - FIRE_BREATH_RANGE;
+  return {
+    x,
+    y: baseY + Math.floor(PLAYER_BODY_H * 0.32),
+    w: FIRE_BREATH_RANGE,
+    h: FIRE_BREATH_H,
+  };
+}
+
+function playerInEnemyFire(idx) {
+  const p = localState.players[idx];
+  const enemy = localState.players[1 - idx];
+  if (!p || !enemy?.fireBreathing) return false;
+  return rectsOverlap(fireBreathRectForPlayer(enemy), {
+    x: p.x,
+    y: getPlayerBaseY(p),
+    w: PLAYER_BODY_W,
+    h: PLAYER_BODY_H,
+  });
+}
+
+function drawFireBreath(p) {
+  if (!p.fireBreathing) return;
+  const r = fireBreathRectForPlayer(p);
+  const held = Math.max(0, Date.now() - (p.fireStartAt || Date.now()));
+  const pulse = 0.72 + 0.16 * Math.sin(performance.now() * 0.03);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = `rgba(255, 86, 22, ${pulse})`;
+  ctx.fillRect(Math.floor(r.x), Math.floor(r.y), Math.ceil(r.w), Math.ceil(r.h));
+  ctx.fillStyle = "rgba(255, 210, 74, 0.85)";
+  ctx.fillRect(Math.floor(r.x), Math.floor(r.y + 4), Math.ceil(r.w * 0.84), Math.max(4, Math.floor(r.h * 0.38)));
+  ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
+  ctx.fillRect(Math.floor(r.x), Math.floor(r.y + 7), Math.ceil(r.w * 0.52), 3);
+  ctx.fillStyle = "rgba(130, 20, 10, 0.5)";
+  const tip = p.facing >= 0 ? r.x + r.w - 6 : r.x + 2;
+  for (let i = 0; i < 5; i += 1) {
+    const yy = r.y + 2 + ((i * 5 + Math.floor(held / 80)) % r.h);
+    ctx.fillRect(Math.floor(tip), Math.floor(yy), 5, 2);
+  }
+  ctx.restore();
+}
+
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
 }
@@ -2034,6 +2120,29 @@ function processMeleeSwordHits() {
       }
       def.health = clamp(def.health - dmg, 0, playerMaxHp(def));
       def.vx = (def.x >= at.x ? 1 : -1) * MELEE_KNOCKBACK_VX;
+    }
+  }
+}
+
+function processFireBreathDamage() {
+  const now = Date.now();
+  for (let ai = 0; ai < 2; ai += 1) {
+    const at = localState.players[ai];
+    if (!at?.fireBreathing) continue;
+    const def = localState.players[1 - ai];
+    if (!def) continue;
+    if (!at.fireNextDamageAt || at.fireNextDamageAt < now - FIRE_BREATH_TICK_MS * 4) {
+      at.fireNextDamageAt = now;
+    }
+    const flame = fireBreathRectForPlayer(at);
+    const defRect = { x: def.x, y: getPlayerBaseY(def), w: PLAYER_BODY_W, h: PLAYER_BODY_H };
+    while (at.fireNextDamageAt <= now) {
+      if (rectsOverlap(flame, defRect)) {
+        const heldMs = Math.max(0, at.fireNextDamageAt - (at.fireStartAt || at.fireNextDamageAt));
+        const dmg = FIRE_BREATH_BASE_DAMAGE + Math.floor(heldMs / 1000);
+        def.health = clamp(def.health - dmg, 0, playerMaxHp(def));
+      }
+      at.fireNextDamageAt += FIRE_BREATH_TICK_MS;
     }
   }
 }
@@ -2168,11 +2277,13 @@ function resetInputState() {
   touchState.jumpFromStick = false;
   touchState.attack = false;
   touchState.orb = false;
+  touchState.fire = false;
   touchState.prevLeft = false;
   touchState.prevRight = false;
   touchState.prevJumpFromStick = false;
   touchState.prevAttack = false;
   touchState.prevOrb = false;
+  touchState.prevFire = false;
   visualState[0].charging = false;
   visualState[1].charging = false;
 }
@@ -2187,6 +2298,10 @@ function clearCombatBuffsFromPlayers() {
     delete p.instantMaxCharge;
     delete p.meleeRangeScale;
     delete p.meleeSwingScale;
+    delete p.fireBreath;
+    delete p.fireBreathing;
+    delete p.fireStartAt;
+    delete p.fireNextDamageAt;
   }
 }
 
@@ -2260,6 +2375,50 @@ function syncRedThousandHpAfterLocalReset() {
   healPlayerToCap(p);
 }
 
+let fireBindState = { active: false, playerIdx: 0, online: false };
+
+function startFireBreathKeyBind(playerIdx, online = false) {
+  if (touchState.enabled) return;
+  if (fireBindState.active) return;
+  fireBindState = { active: true, playerIdx, online };
+  showBanner("Press a key for Fire Breath", 5000);
+  window.addEventListener("keydown", onFireBreathBindKeydown, true);
+}
+
+function onFireBreathBindKeydown(e) {
+  if (!fireBindState.active) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const code = e.code;
+  if (!code || code === "Escape") return;
+  if (fireBindState.online) {
+    keyBindings.online.fire = code;
+  } else if (fireBindState.playerIdx === 0) {
+    keyBindings.p0.fire = code;
+  } else {
+    keyBindings.p1.fire = code;
+  }
+  saveKeyBindings();
+  fireBindState.active = false;
+  window.removeEventListener("keydown", onFireBreathBindKeydown, true);
+  showBanner(`Fire Breath mapped to ${formatKeyLabel(code)}`, 2200);
+}
+
+function startFireBreathLocal(idx) {
+  const p = localState.players[idx];
+  if (!p?.fireBreath || p.fireBreathing || Date.now() < roundLockUntil) return;
+  p.fireBreathing = true;
+  p.fireStartAt = Date.now();
+  p.fireNextDamageAt = Date.now();
+  p.vx = 0;
+}
+
+function stopFireBreathLocal(idx) {
+  const p = localState.players[idx];
+  if (!p) return;
+  p.fireBreathing = false;
+}
+
 let buffAutoPickTimer = null;
 let buffPickGateTimer = null;
 
@@ -2284,6 +2443,7 @@ function applyBuffChoice(buffId) {
   if (!BUFF_DEFS[buffId]) return;
   if (mode === "online") {
     if (socket && roomId) socket.emit("buff:pick", { buffId });
+    if (buffId === "fireBreath") startFireBreathKeyBind(playerIndex, true);
     localState.buffPickActive = false;
     hideBuffPickOverlay();
     return;
@@ -2311,6 +2471,9 @@ function applyBuffChoice(buffId) {
   } else if (buffId === "meleeLong") {
     L.meleeRangeScale = (L.meleeRangeScale != null ? L.meleeRangeScale : 1) * 2;
     L.meleeSwingScale = (L.meleeSwingScale != null ? L.meleeSwingScale : 1) * 2;
+  } else if (buffId === "fireBreath") {
+    L.fireBreath = true;
+    startFireBreathKeyBind(loser, false);
   }
   healPlayerToCap(L);
   localState.buffPickActive = false;
@@ -2421,12 +2584,16 @@ function updateLocalGame() {
 
   const p1 = localState.players[0];
   const p2 = localState.players[1];
-  const p1Left = keys.has(b0.left) || touchState.left;
-  const p1Right = keys.has(b0.right) || touchState.right;
-  const p2Left = mode === "multi" ? keys.has(b1.left) : false;
-  const p2Right = mode === "multi" ? keys.has(b1.right) : false;
+  if (p1.fireBreathing) p1.vx = 0;
+  if (p2.fireBreathing) p2.vx = 0;
+  const p1Left = !p1.fireBreathing && (keys.has(b0.left) || touchState.left);
+  const p1Right = !p1.fireBreathing && (keys.has(b0.right) || touchState.right);
+  const p2Left = mode === "multi" && !p2.fireBreathing ? keys.has(b1.left) : false;
+  const p2Right = mode === "multi" && !p2.fireBreathing ? keys.has(b1.right) : false;
+  const p1MoveSpeed = MOVE_SPEED * (playerInEnemyFire(0) ? FIRE_BREATH_SLOW_MULT : 1);
+  const p2MoveSpeed = MOVE_SPEED * (playerInEnemyFire(1) ? FIRE_BREATH_SLOW_MULT : 1);
 
-  const target1 = p1Left === p1Right ? 0 : p1Left ? -MOVE_SPEED : MOVE_SPEED;
+  const target1 = p1Left === p1Right ? 0 : p1Left ? -p1MoveSpeed : p1MoveSpeed;
   const ax1 = Math.abs(target1) < 0.01 ? MOVE_STOP_ACCEL : MOVE_ACCEL;
   p1.vx += (target1 - p1.vx) * ax1;
   if (Math.abs(target1) < 0.01 && Math.abs(p1.vx) < MOVE_VX_SNAP) p1.vx = 0;
@@ -2434,7 +2601,7 @@ function updateLocalGame() {
   else if (Math.abs(p1.vx) > 0.18) p1.facing = p1.vx > 0 ? 1 : -1;
 
   if (mode === "multi") {
-    const target2 = p2Left === p2Right ? 0 : p2Left ? -MOVE_SPEED : MOVE_SPEED;
+    const target2 = p2Left === p2Right ? 0 : p2Left ? -p2MoveSpeed : p2MoveSpeed;
     const ax2 = Math.abs(target2) < 0.01 ? MOVE_STOP_ACCEL : MOVE_ACCEL;
     p2.vx += (target2 - p2.vx) * ax2;
     if (Math.abs(target2) < 0.01 && Math.abs(p2.vx) < MOVE_VX_SNAP) p2.vx = 0;
@@ -2502,6 +2669,7 @@ function updateLocalGame() {
   }
 
   processMeleeSwordHits();
+  processFireBreathDamage();
 
   localState.projectiles.forEach((shot) => {
     shot.x += shot.vx;
@@ -2559,6 +2727,7 @@ function updateLocalGame() {
       showBanner(`${winName} wins round`);
       localState.round += 1;
     }
+    localState.levelIndex = nextLevelIndex(localState.levelIndex);
     healPlayerToCap(p1);
     healPlayerToCap(p2);
     p1.x = 220;
@@ -2570,6 +2739,12 @@ function updateLocalGame() {
     p1.vx = p2.vx = p1.vy = p2.vy = 0;
     p1.orbAmmo = ORB_AMMO_PER_ROUND;
     p2.orbAmmo = ORB_AMMO_PER_ROUND;
+    p1.fireBreathing = false;
+    p2.fireBreathing = false;
+    p1.fireStartAt = 0;
+    p2.fireStartAt = 0;
+    p1.fireNextDamageAt = 0;
+    p2.fireNextDamageAt = 0;
     localState.projectiles = [];
     if (!matchOver && mode !== "single") {
       localState.buffPickLoser = loser;
@@ -2721,7 +2896,14 @@ function setupSocket() {
       buffPickInputUnlocked: !!state.buffPickInputUnlocked,
       buffPickOptions: Array.isArray(state.buffPickOptions) ? state.buffPickOptions : null,
       roundResult: state.roundResult || null,
+      levelIndex: Number.isInteger(state.levelIndex) ? state.levelIndex : localState.levelIndex,
     };
+    localState.players.forEach((p, i) => {
+      if (p?.fireBreathing && !p.fireStartAt) p.fireStartAt = Date.now();
+      if (p?.fireBreath && i === playerIndex && !touchState.enabled && !onlineK().fire) {
+        startFireBreathKeyBind(playerIndex, true);
+      }
+    });
     for (let i = 0; i < 2; i += 1) {
       if (!visualState[i]) continue;
       visualState[i].charging = !!localState.players[i]?.charging;
@@ -2773,6 +2955,7 @@ function localReset() {
   clearCombatBuffsFromPlayers();
   localState = {
     round: 1,
+    levelIndex: 0,
     players: [
       {
         x: 220,
@@ -2879,6 +3062,12 @@ window.addEventListener("keydown", (e) => {
     if (mode === "multi" && e.code === b1.melee && !e.repeat) {
       doMelee(1);
     }
+    if (localState.players[0]?.fireBreath && b0.fire && e.code === b0.fire && !e.repeat) {
+      startFireBreathLocal(0);
+    }
+    if (mode === "multi" && localState.players[1]?.fireBreath && b1.fire && e.code === b1.fire && !e.repeat) {
+      startFireBreathLocal(1);
+    }
     if (e.code === p0FireKey() && !visualState[0].charging) {
       if (Date.now() >= roundLockUntil) {
         const p0 = localState.players[0];
@@ -2912,6 +3101,9 @@ window.addEventListener("keydown", (e) => {
       visualState[playerIndex].chargeKeyDownAt = Date.now();
       socket.emit("match:input", { action: "chargeStart", controls });
     }
+    if (localState.players[playerIndex]?.fireBreath && ok.fire && e.code === ok.fire && !e.repeat && !onlineIntermissionActive()) {
+      socket.emit("match:input", { action: "fireStart", controls });
+    }
     socket.emit("match:input", { controls });
   }
 });
@@ -2943,6 +3135,8 @@ window.addEventListener("keyup", (e) => {
         fireProjectile(1);
       }
     }
+    if (e.code === keyBindings.p0.fire) stopFireBreathLocal(0);
+    if (mode === "multi" && e.code === keyBindings.p1.fire) stopFireBreathLocal(1);
   }
   if (mode === "online" && socket && roomId) {
     const ok = onlineK();
@@ -2951,6 +3145,9 @@ window.addEventListener("keyup", (e) => {
       const heldMs = Date.now() - (visualState[playerIndex].chargeKeyDownAt || Date.now());
       visualState[playerIndex].charging = false;
       socket.emit("match:input", { action: "chargeRelease", controls });
+    }
+    if (ok.fire && e.code === ok.fire) {
+      socket.emit("match:input", { action: "fireEnd", controls });
     }
     socket.emit("match:input", { controls });
   }
@@ -2968,6 +3165,7 @@ function setupUI() {
       if (action === "right") touchState.right = pressed;
       if (action === "attack") touchState.attack = pressed;
       if (action === "orb") touchState.orb = pressed;
+      if (action === "fire") touchState.fire = pressed;
     };
 
     touchOverlayEl.querySelectorAll("[data-touch-action]").forEach((btn) => {

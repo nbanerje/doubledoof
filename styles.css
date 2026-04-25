@@ -742,6 +742,10 @@ button.lobby-decline {
   user-select: none;
 }
 
+.touch-btn.hidden {
+  display: none;
+}
+
 .touch-btn--attack {
   min-width: 92px;
 }
