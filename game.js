@@ -1126,6 +1126,35 @@ const arcadeTextEl = document.getElementById("arcadeText");
 const arcadeActionsEl = document.getElementById("arcadeActions");
 const settingsDrawerEl = document.getElementById("settingsDrawer");
 const settingsBackdropEl = document.getElementById("settingsBackdrop");
+const touchOverlayEl = document.getElementById("touchOverlay");
+const isTouchDevice =
+  window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window || navigator.maxTouchPoints > 0;
+const touchState = {
+  enabled: isTouchDevice,
+  left: false,
+  right: false,
+  jump: false,
+  attack: false,
+  prevLeft: false,
+  prevRight: false,
+  prevJump: false,
+  prevAttack: false,
+};
+
+function onlineControlsFromInput() {
+  const ok = onlineK();
+  return {
+    left: keys.has(ok.left) || touchState.left,
+    right: keys.has(ok.right) || touchState.right,
+  };
+}
+
+function refreshTouchOverlayVisibility() {
+  if (!touchOverlayEl) return;
+  const visible =
+    touchState.enabled && overlayEl.classList.contains("hidden") && !settingsDrawerEl.classList.contains("open");
+  touchOverlayEl.classList.toggle("hidden", !visible);
+}
 
 function showBanner(text, durationMs = 1200) {
   const el = document.getElementById("roundBanner");
@@ -1592,6 +1621,8 @@ function drawProjectile(s) {
 }
 
 function render() {
+  applyTouchInput();
+  refreshTouchOverlayVisibility();
   updateLocalGame();
   beginPixelGameFrame();
   drawArenaBackground();
@@ -1605,6 +1636,61 @@ function render() {
   endPixelGameFrame();
   drawHudOnView();
   requestAnimationFrame(render);
+}
+
+function applyTouchInput() {
+  if (!touchState.enabled || remapState.active || localState.buffPickActive || !overlayEl.classList.contains("hidden")) {
+    touchState.prevLeft = touchState.left;
+    touchState.prevRight = touchState.right;
+    touchState.prevJump = touchState.jump;
+    touchState.prevAttack = touchState.attack;
+    return;
+  }
+
+  if (mode !== "online") {
+    const b0 = keyBindings.p0;
+    if (touchState.jump && !touchState.prevJump) {
+      tryJump(0, b0.jump);
+    }
+    if (touchState.attack && !touchState.prevAttack && !visualState[0].charging) {
+      if (Date.now() >= roundLockUntil) {
+        const p0 = localState.players[0];
+        const a0 = p0.orbAmmo != null ? p0.orbAmmo : ORB_AMMO_PER_ROUND;
+        if (p0.infiniteAmmo || a0 > 0) {
+          p0.chargeStartAt = Date.now();
+          visualState[0].charging = true;
+        }
+      }
+    }
+    if (!touchState.attack && touchState.prevAttack) {
+      const wasCharging = visualState[0].charging;
+      const heldMs = Date.now() - localState.players[0].chargeStartAt;
+      visualState[0].charging = false;
+      if (wasCharging && heldMs >= CHARGE_THRESHOLD_MS) {
+        fireProjectile(0);
+      }
+    }
+  } else if (socket && roomId) {
+    const controls = onlineControlsFromInput();
+    if (touchState.left !== touchState.prevLeft || touchState.right !== touchState.prevRight) {
+      socket.emit("match:input", { controls });
+    }
+    if (touchState.attack && !touchState.prevAttack && !onlineIntermissionActive()) {
+      visualState[playerIndex].charging = true;
+      visualState[playerIndex].chargeKeyDownAt = Date.now();
+      socket.emit("match:input", { action: "chargeStart", controls });
+    }
+    if (!touchState.attack && touchState.prevAttack && !onlineIntermissionActive()) {
+      visualState[playerIndex].charging = false;
+      triggerSwing(playerIndex);
+      socket.emit("match:input", { action: "chargeRelease", controls });
+    }
+  }
+
+  touchState.prevLeft = touchState.left;
+  touchState.prevRight = touchState.right;
+  touchState.prevJump = touchState.jump;
+  touchState.prevAttack = touchState.attack;
 }
 
 /** Horizontal stepped sky (no smooth gradients) for pixel look. */
@@ -1957,6 +2043,14 @@ function fireProjectile(attackerIdx, override = null) {
 
 function resetInputState() {
   keys.clear();
+  touchState.left = false;
+  touchState.right = false;
+  touchState.jump = false;
+  touchState.attack = false;
+  touchState.prevLeft = false;
+  touchState.prevRight = false;
+  touchState.prevJump = false;
+  touchState.prevAttack = false;
   visualState[0].charging = false;
   visualState[1].charging = false;
 }
@@ -2167,13 +2261,13 @@ function updateLocalGame() {
   // Guard against missed keyup when focus changes.
   const b0 = keyBindings.p0;
   const b1 = keyBindings.p1;
-  if (!keys.has(p0FireKey())) visualState[0].charging = false;
+  if (!keys.has(p0FireKey()) && !touchState.attack) visualState[0].charging = false;
   if (!keys.has(p1FireKey())) visualState[1].charging = false;
 
   const p1 = localState.players[0];
   const p2 = localState.players[1];
-  const p1Left = keys.has(b0.left);
-  const p1Right = keys.has(b0.right);
+  const p1Left = keys.has(b0.left) || touchState.left;
+  const p1Right = keys.has(b0.right) || touchState.right;
   const p2Left = mode === "multi" ? keys.has(b1.left) : false;
   const p2Right = mode === "multi" ? keys.has(b1.right) : false;
 
@@ -2578,10 +2672,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (mode === "online" && socket && roomId) {
     const ok = onlineK();
-    const controls = {
-      left: keys.has(ok.left),
-      right: keys.has(ok.right),
-    };
+    const controls = onlineControlsFromInput();
     if (e.code === ok.attack && !onlineIntermissionActive()) {
       visualState[playerIndex].charging = true;
       visualState[playerIndex].chargeKeyDownAt = Date.now();
@@ -2621,10 +2712,7 @@ window.addEventListener("keyup", (e) => {
   }
   if (mode === "online" && socket && roomId) {
     const ok = onlineK();
-    const controls = {
-      left: keys.has(ok.left),
-      right: keys.has(ok.right),
-    };
+    const controls = onlineControlsFromInput();
     if (e.code === ok.attack && !onlineIntermissionActive()) {
       const heldMs = Date.now() - (visualState[playerIndex].chargeKeyDownAt || Date.now());
       visualState[playerIndex].charging = false;
@@ -2641,6 +2729,30 @@ document.addEventListener("visibilitychange", () => {
 });
 
 function setupUI() {
+  if (touchOverlayEl) {
+    const applyTouchAction = (action, pressed) => {
+      if (action === "left") touchState.left = pressed;
+      if (action === "right") touchState.right = pressed;
+      if (action === "jump") touchState.jump = pressed;
+      if (action === "attack") touchState.attack = pressed;
+    };
+
+    touchOverlayEl.querySelectorAll("[data-touch-action]").forEach((btn) => {
+      const action = btn.getAttribute("data-touch-action");
+      if (!action) return;
+      btn.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        applyTouchAction(action, true);
+      });
+      btn.addEventListener("pointerup", (e) => {
+        e.preventDefault();
+        applyTouchAction(action, false);
+      });
+      btn.addEventListener("pointercancel", () => applyTouchAction(action, false));
+      btn.addEventListener("pointerleave", () => applyTouchAction(action, false));
+    });
+  }
+
   document.getElementById("singleBtn").addEventListener("click", () => {
     mode = "single";
     setMatchStatus("Single player mode.");

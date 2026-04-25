@@ -648,6 +648,49 @@ button.lobby-decline {
   border-color: #6a4a4a;
 }
 
+.touch-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  z-index: 7;
+  pointer-events: none;
+}
+
+.touch-cluster {
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.touch-btn {
+  min-width: 68px;
+  min-height: 52px;
+  border-radius: 12px;
+  border: 1px solid rgba(140, 170, 235, 0.7);
+  background: rgba(18, 28, 54, 0.78);
+  color: #e8efff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  backdrop-filter: blur(2px);
+  touch-action: none;
+  user-select: none;
+}
+
+.touch-btn--attack {
+  min-width: 92px;
+}
+
+.touch-btn:active {
+  transform: translateY(1px) scale(0.98);
+  background: rgba(34, 50, 90, 0.88);
+}
+
 @media (max-width: 1100px) {
   .settings-drawer {
     top: 8px;
