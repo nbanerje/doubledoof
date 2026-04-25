@@ -410,6 +410,13 @@ const GUY2_RUN_URLS = [
   "./assets/guy2-run-4.png",
 ];
 const GUY2_HIT_URL = "./assets/guy2-hit.png";
+const DRAGON_IDLE_URL = "./assets/dragon-idle.png";
+const DRAGON_RUN_URLS = [
+  "./assets/dragon-run-1.png",
+  "./assets/dragon-run-2.png",
+  "./assets/dragon-run-3.png",
+  "./assets/dragon-run-4.png",
+];
 const MELEE_SWORD_URL = "./assets/melee-sword.png";
 const FIRE_BREATH_RIGHT_URL = "./assets/fire-breath-right-sheet.png";
 const FIRE_BREATH_LEFT_URL = "./assets/fire-breath-left-sheet.png";
@@ -420,8 +427,10 @@ const fireBreathLeftImage = new Image();
 const percivalHitImage = new Image();
 const guy2IdleImage = new Image();
 const guy2HitImage = new Image();
+const dragonIdleImage = new Image();
 const percivalRunImages = PERCIVAL_RUN_URLS.map(() => new Image());
 const guy2RunImages = GUY2_RUN_URLS.map(() => new Image());
+const dragonRunImages = DRAGON_RUN_URLS.map(() => new Image());
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let percivalIdleBlit = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
@@ -430,6 +439,8 @@ let percivalHitBlit = null;
 let guy2IdleBlit = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let guy2HitBlit = null;
+/** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
+let dragonIdleBlit = null;
 /**
  * Four run blits in order: 1 → 2 → 3 → 4 → loop (each file is keyed + cropped to the knight).
  * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
@@ -439,6 +450,10 @@ let percivalRun = null;
  * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
  */
 let guy2Run = null;
+/**
+ * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
+ */
+let dragonRun = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let meleeSwordBlit = null;
 
@@ -481,6 +496,8 @@ function keyPercivalToCanvas(img) {
   const c10 = (iw - 1) * 4;
   const c01 = (ih - 1) * iw * 4;
   const c11 = ((ih - 1) * iw + (iw - 1)) * 4;
+  const ba = (d[c00 + 3] + d[c10 + 3] + d[c01 + 3] + d[c11 + 3]) / 4;
+  if (ba < 8) return { canvas: c, d, iw, ih };
   const br = (d[c00] + d[c10] + d[c01] + d[c11]) / 4;
   const bg = (d[c00 + 1] + d[c10 + 1] + d[c01 + 1] + d[c11 + 1]) / 4;
   const bb = (d[c00 + 2] + d[c10 + 2] + d[c01 + 2] + d[c11 + 2]) / 4;
@@ -549,6 +566,14 @@ guy2HitImage.onload = initGuy2HitBlit;
 guy2HitImage.src = GUY2_HIT_URL;
 if (guy2HitImage.complete) initGuy2HitBlit();
 
+function initDragonIdleBlit() {
+  if (!dragonIdleImage.naturalWidth) return;
+  dragonIdleBlit = buildPercivalIdleBlit(dragonIdleImage);
+}
+dragonIdleImage.onload = initDragonIdleBlit;
+dragonIdleImage.src = DRAGON_IDLE_URL;
+if (dragonIdleImage.complete) initDragonIdleBlit();
+
 function initMeleeSwordBlit() {
   if (!meleeSwordImage.naturalWidth) return;
   meleeSwordBlit = buildPercivalIdleBlit(meleeSwordImage);
@@ -596,6 +621,25 @@ for (let i = 0; i < percivalRunImages.length; i += 1) {
   percivalRunImages[i].onload = tryInitPercivalRun;
   percivalRunImages[i].src = PERCIVAL_RUN_URLS[i];
   if (percivalRunImages[i].complete) tryInitPercivalRun();
+}
+
+function tryInitDragonRun() {
+  for (let i = 0; i < dragonRunImages.length; i += 1) {
+    const im = dragonRunImages[i];
+    if (!im.complete || !im.naturalWidth) return;
+  }
+  const frames = [];
+  for (let i = 0; i < dragonRunImages.length; i += 1) {
+    const b = buildPercivalIdleBlit(dragonRunImages[i]);
+    if (!b) return;
+    frames.push(b);
+  }
+  dragonRun = { frames };
+}
+for (let i = 0; i < dragonRunImages.length; i += 1) {
+  dragonRunImages[i].onload = tryInitDragonRun;
+  dragonRunImages[i].src = DRAGON_RUN_URLS[i];
+  if (dragonRunImages[i].complete) tryInitDragonRun();
 }
 
 function defaultKeyBindings() {
@@ -996,7 +1040,7 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
   stepLabelEl.textContent = isCharacter ? "Pick character" : "Pick weapon";
   arcadeTitleEl.textContent = isCharacter ? "Pick Character" : "Pick Weapon";
   arcadeTextEl.textContent = isCharacter
-    ? `${label}: choose from 6 character slots. Only Knight is available right now.`
+    ? `${label}: choose from 6 character slots. Knight and Dragon are available right now.`
     : `${label}: choose from 6 weapon slots. Only Sword is available right now.`;
   arcadeActionsEl.innerHTML = "";
   arcadeActionsEl.classList.add("arcade-actions--char-pick");
@@ -1015,7 +1059,7 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
     if (loadout[selectedKey] === opt.id) btn.classList.add("selected");
     const preview = document.createElement("span");
     preview.className = `char-tile-preview char-tile-preview--${isCharacter ? "character" : "weapon"}`;
-    preview.textContent = opt.enabled ? (isCharacter ? "K" : "S") : String(i + 1);
+    preview.textContent = opt.enabled ? (isCharacter ? (opt.id === "dragon" ? "D" : "K") : "S") : String(i + 1);
     const text = document.createElement("span");
     text.className = "char-tile-label";
     text.textContent = opt.label;
@@ -1046,6 +1090,13 @@ function nextStepAfterWeapon(playerIdx) {
   if (mode === "multi" && playerIdx === 0) return "character_p2";
   if (mode === "online") return "controls_online";
   return "controls_p1";
+}
+
+function selectedCharacterForRender(idx) {
+  if (mode === "online") {
+    return idx === playerIndex ? selectedOnlineLoadout.character : "knight";
+  }
+  return selectedLoadouts[idx]?.character || "knight";
 }
 
 /** Distinct level layouts; `getLevelForRound` cycles (first-to-5 match length is independent). */
@@ -1198,7 +1249,7 @@ let myShareName = "";
 let myLobbyUserId = "";
 const CHARACTER_OPTIONS = [
   { id: "knight", label: "Knight", enabled: true },
-  { id: "locked-1", label: "Coming soon", enabled: false },
+  { id: "dragon", label: "Dragon", enabled: true },
   { id: "locked-2", label: "Coming soon", enabled: false },
   { id: "locked-3", label: "Coming soon", enabled: false },
   { id: "locked-4", label: "Coming soon", enabled: false },
@@ -1648,8 +1699,38 @@ function drawPlayer(p) {
   const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
   const px = Math.floor(p.x);
   const py = Math.floor(baseY);
+  const characterId = selectedCharacterForRender(idx);
 
-  if (idx === 0 && percivalIdleBlit) {
+  if (characterId === "dragon" && dragonIdleBlit) {
+    const movingH =
+      mode === "online"
+        ? v.prevDrawX != null && Math.abs(p.x - v.prevDrawX) > 0.2
+        : Math.abs(p.vx) > 0.1;
+    const useRun = dragonRun != null && dragonRun.frames.length >= 4 && movingH;
+    const bl = useRun
+      ? (() => {
+          const f = dragonRun.frames;
+          const fi = Math.floor(performance.now() * 0.012) % f.length;
+          const fr = f[fi];
+          return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
+        })()
+      : dragonIdleBlit;
+    const s = Math.min((PLAYER_BODY_W * 1.14) / bl.cw, (PLAYER_BODY_H * 1.04) / bl.ch);
+    const dw = bl.cw * s;
+    const dh = bl.ch * s;
+    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1);
+    const footY = baseY + PLAYER_BODY_H;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    if (recoil) {
+      ctx.fillStyle = "rgba(255, 60, 60, 0.22)";
+      ctx.fillRect(p.x, baseY, PLAYER_BODY_W, PLAYER_BODY_H);
+    }
+    ctx.translate(footX, footY);
+    ctx.scale(p.facing || 1, 1);
+    ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -dw / 2, -dh, dw, dh);
+    ctx.restore();
+  } else if (idx === 0 && percivalIdleBlit) {
     const movingH =
       mode === "online"
         ? v.prevDrawX != null && Math.abs(p.x - v.prevDrawX) > 0.2
