@@ -378,8 +378,8 @@ const FIRE_BREATH_TICK_MS = 100;
 const FIRE_BREATH_FRAME_COUNT = 26;
 const FIRE_BREATH_FRAME_MS = 24;
 const FIRE_BREATH_BASE_DAMAGE = 3;
-const FIRE_BREATH_SLOW_MULT = 0.42;
-const FIRE_BREATH_GROWTH_PER_TICK = 0.01;
+const FIRE_BREATH_SLOW_MULT = 0.25;
+const FIRE_BREATH_GROWTH_PER_TICK = 0.03;
 const DEFAULT_MAX_HP = 100;
 const TANK_BUFF_MAX_HP = 130;
 /** A match ends as soon as one side reaches this many round wins. */
@@ -401,6 +401,13 @@ const PERCIVAL_RUN_URLS = [
   "./assets/percival-run-3.png",
   "./assets/percival-run-4.png",
 ];
+const JUMP_FLIP_URLS = [
+  "./assets/jump-flip-1.png",
+  "./assets/jump-flip-2.png",
+  "./assets/jump-flip-3.png",
+  "./assets/jump-flip-4.png",
+];
+const JUMP_FLIP_FRAME_MS = 85;
 const PERCIVAL_HIT_URL = "./assets/percival-hit.png";
 const GUY2_IDLE_URL = "./assets/guy2-idle.png";
 const GUY2_RUN_URLS = [
@@ -422,6 +429,7 @@ const guy2IdleImage = new Image();
 const guy2HitImage = new Image();
 const percivalRunImages = PERCIVAL_RUN_URLS.map(() => new Image());
 const guy2RunImages = GUY2_RUN_URLS.map(() => new Image());
+const jumpFlipImages = JUMP_FLIP_URLS.map(() => new Image());
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let percivalIdleBlit = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
@@ -439,6 +447,11 @@ let percivalRun = null;
  * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
  */
 let guy2Run = null;
+/**
+ * Shared flip frames: 1 -> 2 -> 3 -> 4, then hold frame 4 until landing.
+ * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
+ */
+let jumpFlip = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let meleeSwordBlit = null;
 
@@ -481,6 +494,8 @@ function keyPercivalToCanvas(img) {
   const c10 = (iw - 1) * 4;
   const c01 = (ih - 1) * iw * 4;
   const c11 = ((ih - 1) * iw + (iw - 1)) * 4;
+  const ba = (d[c00 + 3] + d[c10 + 3] + d[c01 + 3] + d[c11 + 3]) / 4;
+  if (ba < 8) return { canvas: c, d, iw, ih };
   const br = (d[c00] + d[c10] + d[c01] + d[c11]) / 4;
   const bg = (d[c00 + 1] + d[c10 + 1] + d[c01 + 1] + d[c11 + 1]) / 4;
   const bb = (d[c00 + 2] + d[c10 + 2] + d[c01 + 2] + d[c11 + 2]) / 4;
@@ -596,6 +611,25 @@ for (let i = 0; i < percivalRunImages.length; i += 1) {
   percivalRunImages[i].onload = tryInitPercivalRun;
   percivalRunImages[i].src = PERCIVAL_RUN_URLS[i];
   if (percivalRunImages[i].complete) tryInitPercivalRun();
+}
+
+function tryInitJumpFlip() {
+  for (let i = 0; i < jumpFlipImages.length; i += 1) {
+    const im = jumpFlipImages[i];
+    if (!im.complete || !im.naturalWidth) return;
+  }
+  const frames = [];
+  for (let i = 0; i < jumpFlipImages.length; i += 1) {
+    const b = buildPercivalIdleBlit(jumpFlipImages[i]);
+    if (!b) return;
+    frames.push(b);
+  }
+  jumpFlip = { frames };
+}
+for (let i = 0; i < jumpFlipImages.length; i += 1) {
+  jumpFlipImages[i].onload = tryInitJumpFlip;
+  jumpFlipImages[i].src = JUMP_FLIP_URLS[i];
+  if (jumpFlipImages[i].complete) tryInitJumpFlip();
 }
 
 function defaultKeyBindings() {
@@ -1109,6 +1143,16 @@ function currentPlatforms() {
   return currentLevel().platforms;
 }
 
+function groundYForPlayer(p, level) {
+  let groundY = FLOOR_Y;
+  const platforms = Array.isArray(level?.platforms) ? level.platforms : [];
+  for (const plat of platforms) {
+    const overlapsX = p.x + PLAYER_BODY_W > plat.x && p.x < plat.x + plat.w;
+    if (overlapsX && plat.y < groundY) groundY = plat.y;
+  }
+  return groundY;
+}
+
 let mode = "single";
 /** Konami-style: last digit keys typed (digits only); `2017` → red (P2) gets 1000 max HP in local play. */
 let cheatRedDigitBuffer = "";
@@ -1143,6 +1187,8 @@ const visualState = [
     shootFlashUntil: 0,
     /** @type {number | undefined} last `p.x` for run animation (blue) */
     prevDrawX: undefined,
+    airStartAt: 0,
+    wasOnGround: true,
   },
   {
     recoilUntil: 0,
@@ -1156,6 +1202,8 @@ const visualState = [
     shootFlashUntil: 0,
     /** @type {number | undefined} last `p.x` for run animation (red) */
     prevDrawX: undefined,
+    airStartAt: 0,
+    wasOnGround: true,
   },
 ];
 let roundLockUntil = 0;
@@ -1535,6 +1583,14 @@ function drawPlayer(p) {
   const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
   const px = Math.floor(p.x);
   const py = Math.floor(baseY);
+  const platformGroundY = groundYForPlayer(p, currentLevel());
+  const airborne =
+    p.onGround === false ||
+    (p.onGround !== true && baseY < platformGroundY - PLAYER_BODY_H - 0.5);
+  if (airborne && v.wasOnGround) v.airStartAt = now;
+  if (!airborne) v.airStartAt = 0;
+  v.wasOnGround = !airborne;
+  const useJumpFlip = airborne && jumpFlip != null && jumpFlip.frames.length >= 4;
 
   if (idx === 0 && percivalIdleBlit) {
     const movingH =
@@ -1543,9 +1599,16 @@ function drawPlayer(p) {
         : Math.abs(p.vx) > 0.1;
     const useHit = recoil > 0 && percivalHitBlit != null;
     const useRun =
-      !useHit && percivalRun != null && percivalRun.frames.length >= 4 && movingH;
+      !useHit && !useJumpFlip && percivalRun != null && percivalRun.frames.length >= 4 && movingH;
     const bl = useHit
       ? percivalHitBlit
+      : useJumpFlip
+        ? (() => {
+            const f = jumpFlip.frames;
+            const fi = Math.min(f.length - 1, Math.floor((now - v.airStartAt) / JUMP_FLIP_FRAME_MS));
+            const fr = f[fi];
+            return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
+          })()
       : useRun
         ? (() => {
             const f = percivalRun.frames;
@@ -1576,9 +1639,16 @@ function drawPlayer(p) {
         : Math.abs(p.vx) > 0.1;
     const useHit = recoil > 0 && guy2HitBlit != null;
     const useRun =
-      !useHit && guy2Run != null && guy2Run.frames.length >= 4 && movingH;
+      !useHit && !useJumpFlip && guy2Run != null && guy2Run.frames.length >= 4 && movingH;
     const bl = useHit
       ? guy2HitBlit
+      : useJumpFlip
+        ? (() => {
+            const f = jumpFlip.frames;
+            const fi = Math.min(f.length - 1, Math.floor((now - v.airStartAt) / JUMP_FLIP_FRAME_MS));
+            const fr = f[fi];
+            return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
+          })()
       : useRun
         ? (() => {
             const f = guy2Run.frames;
@@ -2645,10 +2715,16 @@ function updateLocalGame() {
   const p2 = localState.players[1];
   if (p1.fireBreathing) p1.vx = 0;
   if (p2.fireBreathing) p2.vx = 0;
-  const p1Left = !p1.fireBreathing && (keys.has(b0.left) || touchState.left);
-  const p1Right = !p1.fireBreathing && (keys.has(b0.right) || touchState.right);
-  const p2Left = mode === "multi" && !p2.fireBreathing ? keys.has(b1.left) : false;
-  const p2Right = mode === "multi" && !p2.fireBreathing ? keys.has(b1.right) : false;
+  const p1InputLeft = keys.has(b0.left) || touchState.left;
+  const p1InputRight = keys.has(b0.right) || touchState.right;
+  const p2InputLeft = mode === "multi" ? keys.has(b1.left) : false;
+  const p2InputRight = mode === "multi" ? keys.has(b1.right) : false;
+  if (p1.fireBreathing && p1InputLeft !== p1InputRight) p1.facing = p1InputRight ? 1 : -1;
+  if (p2.fireBreathing && p2InputLeft !== p2InputRight) p2.facing = p2InputRight ? 1 : -1;
+  const p1Left = !p1.fireBreathing && p1InputLeft;
+  const p1Right = !p1.fireBreathing && p1InputRight;
+  const p2Left = !p2.fireBreathing && p2InputLeft;
+  const p2Right = !p2.fireBreathing && p2InputRight;
   const p1MoveSpeed = MOVE_SPEED * (playerInEnemyFire(0) ? FIRE_BREATH_SLOW_MULT : 1);
   const p2MoveSpeed = MOVE_SPEED * (playerInEnemyFire(1) ? FIRE_BREATH_SLOW_MULT : 1);
 
@@ -2668,7 +2744,7 @@ function updateLocalGame() {
     else if (Math.abs(p2.vx) > 0.18) p2.facing = p2.vx > 0 ? 1 : -1;
   } else {
     const d = p1.x - p2.x;
-    const target2 = Math.abs(d) > 60 ? (d > 0 ? MOVE_SPEED * 0.75 : -MOVE_SPEED * 0.75) : 0;
+    const target2 = Math.abs(d) > 60 ? (d > 0 ? p2MoveSpeed * 0.75 : -p2MoveSpeed * 0.75) : 0;
     const ax2b = Math.abs(target2) < 0.01 ? MOVE_STOP_ACCEL : MOVE_ACCEL * 0.88;
     p2.vx += (target2 - p2.vx) * ax2b;
     if (Math.abs(target2) < 0.01 && Math.abs(p2.vx) < MOVE_VX_SNAP) p2.vx = 0;
@@ -3073,6 +3149,8 @@ function localReset() {
     chargeKeyDownAt: 0,
     shootFlashUntil: 0,
     prevDrawX: undefined,
+    airStartAt: 0,
+    wasOnGround: true,
   };
   visualState[1] = {
     recoilUntil: 0,
@@ -3085,6 +3163,8 @@ function localReset() {
     chargeKeyDownAt: 0,
     shootFlashUntil: 0,
     prevDrawX: undefined,
+    airStartAt: 0,
+    wasOnGround: true,
   };
   syncRedThousandHpAfterLocalReset();
 }

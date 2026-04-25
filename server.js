@@ -49,8 +49,8 @@ const FIRE_BREATH_RANGE = PLAYER_BODY_W * 1.5;
 const FIRE_BREATH_H = 20;
 const FIRE_BREATH_TICK_MS = 100;
 const FIRE_BREATH_BASE_DAMAGE = 3;
-const FIRE_BREATH_SLOW_MULT = 0.42;
-const FIRE_BREATH_GROWTH_PER_TICK = 0.01;
+const FIRE_BREATH_SLOW_MULT = 0.25;
+const FIRE_BREATH_GROWTH_PER_TICK = 0.03;
 const LEVEL_PLATFORMS = [
   [
     { x: 140, y: 490, w: 180, h: 14 },
@@ -611,6 +611,9 @@ function updateRoom(room) {
     p.vx = 0;
     if (p.fireBreathing) {
       p.vx = 0;
+      if (left !== right) {
+        p.facing = right ? 1 : -1;
+      }
     } else if (left && !right) {
       p.vx = -moveSpeed;
       p.facing = -1;
@@ -783,6 +786,7 @@ setInterval(() => {
         id: p.id,
         x: p.x,
         y: p.y,
+        onGround: !!p.onGround,
         health: p.health,
         maxHealth: playerMaxHp(p),
         facing: p.facing,
