@@ -1169,12 +1169,6 @@ function renderOnlineLobby() {
   host.textContent = "Host match (wait for join)";
   arcadeActionsEl.appendChild(host);
 
-  const join = document.createElement("button");
-  join.type = "button";
-  join.dataset.action = "lobby_join";
-  join.textContent = "Join by code";
-  arcadeActionsEl.appendChild(join);
-
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.dataset.action = "cancelOnline";
@@ -2802,12 +2796,12 @@ function setupUI() {
       setArcadeStep("mode");
     }
     if (action === "lobby_host") {
-      if (socket) socket.emit("room:create");
-    }
-    if (action === "lobby_join") {
-      const input = document.getElementById("joinCodeInput");
-      if (input instanceof HTMLInputElement && socket) {
-        socket.emit("join:code", { code: input.value.trim() });
+      if (!socket || !socket.connected) {
+        showBanner("Still connecting to online...");
+      } else {
+        socket.emit("room:create");
+        setMatchStatus("Hosting: waiting for join by your code.");
+        showBanner("Host room open (1 spot)");
       }
     }
   });
@@ -2818,9 +2812,19 @@ function setupUI() {
     if (!btn || !socket) return;
     const act = btn.getAttribute("data-lobby-action");
     if (act === "joinCode") {
+      if (!socket.connected) {
+        showBanner("Still connecting to online...");
+        return;
+      }
       const input = document.getElementById("joinCodeInput");
       if (input instanceof HTMLInputElement) {
-        socket.emit("join:code", { code: input.value.trim() });
+        const code = input.value.trim();
+        if (!/^\d{5}$/.test(code)) {
+          showBanner("Enter a 5-digit host code");
+          return;
+        }
+        setMatchStatus(`Joining host ${code}...`);
+        socket.emit("join:code", { code });
       }
     }
     if (act === "accept") {
