@@ -520,10 +520,13 @@ io.on("connection", (socket) => {
       broadcastLobby();
     });
 
-    socket.on("join:code", ({ code }) => {
+    socket.on("join:code", ({ code }, ack) => {
+      const done = typeof ack === "function" ? ack : () => {};
       const targetCode = String(code || "").trim();
       if (!/^\d{5}$/.test(targetCode)) {
-        socket.emit("game:error", { message: "Enter a valid 5-digit host code" });
+        const message = "Enter a valid 5-digit host code";
+        socket.emit("game:error", { message });
+        done({ ok: false, message });
         return;
       }
       let hostUserId = null;
@@ -534,25 +537,34 @@ io.on("connection", (socket) => {
         }
       }
       if (!hostUserId) {
-        socket.emit("game:error", { message: "No host found with that code" });
+        const message = "No host found with that code";
+        socket.emit("game:error", { message });
+        done({ ok: false, message });
         return;
       }
       if (hostUserId === socket.userId) {
-        socket.emit("game:error", { message: "That is your own host code" });
+        const message = "That is your own host code";
+        socket.emit("game:error", { message });
+        done({ ok: false, message });
         return;
       }
       const roomId = findHostRoomId(hostUserId);
       if (!roomId) {
-        socket.emit("game:error", { message: "That host has not started hosting yet" });
+        const message = "That host has not started hosting yet";
+        socket.emit("game:error", { message });
+        done({ ok: false, message });
         return;
       }
       detachUserFromRooms(socket.userId, roomId);
       const joined = attachGuestToRoom(roomId, socket.userId, socket.id);
       if (!joined.ok) {
-        socket.emit("game:error", { message: joined.reason });
+        const message = joined.reason || "Could not join that host";
+        socket.emit("game:error", { message });
+        done({ ok: false, message });
         return;
       }
       broadcastLobby();
+      done({ ok: true, message: "Joined host room" });
     });
 
     socket.on("invite:send", ({ targetUserId }) => {

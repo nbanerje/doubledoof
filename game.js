@@ -2542,6 +2542,28 @@ function setupSocket() {
   });
 }
 
+function joinHostByCodeFromUi() {
+  if (!socket || !socket.connected) {
+    showBanner("Still connecting to online...");
+    return;
+  }
+  const input = document.getElementById("joinCodeInput");
+  if (!(input instanceof HTMLInputElement)) return;
+  const code = input.value.trim();
+  if (!/^\d{5}$/.test(code)) {
+    showBanner("Enter a 5-digit host code");
+    return;
+  }
+  setMatchStatus(`Joining host ${code}...`);
+  socket.emit("join:code", { code }, (res) => {
+    if (!res || !res.ok) {
+      showBanner(res?.message || "Could not join that host");
+      return;
+    }
+    showBanner("Join request accepted");
+  });
+}
+
 function localReset() {
   clearCombatBuffsFromPlayers();
   localState = {
@@ -2924,20 +2946,7 @@ function setupUI() {
     if (!btn || !socket) return;
     const act = btn.getAttribute("data-lobby-action");
     if (act === "joinCode") {
-      if (!socket.connected) {
-        showBanner("Still connecting to online...");
-        return;
-      }
-      const input = document.getElementById("joinCodeInput");
-      if (input instanceof HTMLInputElement) {
-        const code = input.value.trim();
-        if (!/^\d{5}$/.test(code)) {
-          showBanner("Enter a 5-digit host code");
-          return;
-        }
-        setMatchStatus(`Joining host ${code}...`);
-        socket.emit("join:code", { code });
-      }
+      joinHostByCodeFromUi();
     }
     if (act === "accept") {
       const rid = btn.getAttribute("data-room-id");
@@ -2957,6 +2966,15 @@ function setupUI() {
   document.getElementById("settingsToggleBtn").addEventListener("click", openSettings);
   document.getElementById("settingsCloseBtn").addEventListener("click", closeSettings);
   settingsBackdropEl.addEventListener("click", closeSettings);
+
+  overlayEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (target.id !== "joinCodeInput") return;
+    e.preventDefault();
+    joinHostByCodeFromUi();
+  });
 
   const buffOverlay = document.getElementById("buffPickOverlay");
   if (buffOverlay) {
