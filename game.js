@@ -141,6 +141,59 @@ function drawRoundIntermissionHud(vc) {
   vc.strokeText(label, VIEW_W / 2, VIEW_H / 2 - 24);
   vc.fillStyle = "#fde047";
   vc.fillText(label, VIEW_W / 2, VIEW_H / 2 - 24);
+  const result = localState.roundResult;
+  if (result && Number.isInteger(result.winnerIdx) && Number.isInteger(result.loserIdx)) {
+    const winnerName = result.winnerIdx === 0 ? "Blue" : "Red";
+    const loserName = result.loserIdx === 0 ? "Blue" : "Red";
+    const winnerColor = result.winnerIdx === 0 ? "#7ec8ff" : "#ff9aa3";
+    const loserColor = result.loserIdx === 0 ? "#7ec8ff" : "#ff9aa3";
+    const boxW = 560;
+    const boxH = 126;
+    const boxX = VIEW_W / 2 - boxW / 2;
+    const boxY = VIEW_H / 2 + 54;
+    vc.fillStyle = "rgba(7, 12, 26, 0.84)";
+    vc.beginPath();
+    vc.roundRect(boxX, boxY, boxW, boxH, 16);
+    vc.fill();
+    vc.strokeStyle = "rgba(180, 200, 255, 0.42)";
+    vc.lineWidth = 2;
+    vc.stroke();
+    vc.font = '800 28px "DM Sans", system-ui, sans-serif';
+    vc.textBaseline = "top";
+    hudStrokeFillText(vc, `${winnerName} won the round`, VIEW_W / 2, boxY + 16, winnerColor);
+    vc.font = HUD_FONT_MAIN;
+    vc.textAlign = "left";
+    const leftX = boxX + 34;
+    const rightX = boxX + boxW / 2 + 24;
+    hudStrokeFillText(
+      vc,
+      `${winnerName}: ${Math.max(0, Math.round(result.winnerHealth ?? 0))} HP left`,
+      leftX,
+      boxY + 62,
+      winnerColor
+    );
+    hudStrokeFillText(
+      vc,
+      `${loserName}: ${Math.max(0, Math.round(result.loserHealth ?? 0))} HP left`,
+      rightX,
+      boxY + 62,
+      loserColor
+    );
+    hudStrokeFillText(
+      vc,
+      `${winnerName} wins: ${result.winnerScore ?? 0}/${WINS_TO_END_MATCH}`,
+      leftX,
+      boxY + 90,
+      "#f4f7ff"
+    );
+    hudStrokeFillText(
+      vc,
+      `${loserName} wins: ${result.loserScore ?? 0}/${WINS_TO_END_MATCH}`,
+      rightX,
+      boxY + 90,
+      "#f4f7ff"
+    );
+  }
   vc.restore();
 }
 
@@ -197,6 +250,7 @@ const PLAYER_BODY_H = 48;
 const keys = new Set();
 const keyTimes = new Map();
 const authTokenKey = "bat-duel-token";
+const ACCOUNT_AUTH_DISABLED = true;
 const MOVE_SPEED = 4;
 /** Horizontal velocity eases toward input each frame (reduces jitter / stair-stepping). */
 const MOVE_ACCEL = 0.4;
@@ -780,17 +834,16 @@ function commitRemap() {
   saveKeyBindings();
   teardownRemapWizard();
   clearArcadeExtra();
-  arcadeTextEl.textContent = "Launch this round now.";
   if (t === "online") {
     setupSocket();
     return;
   }
   if (t === "p0") {
     if (mode === "multi") setArcadeStep("controls_p2");
-    else setArcadeStep("ready");
+    else launchLocalRoundFromSetup();
     return;
   }
-  setArcadeStep("ready");
+  launchLocalRoundFromSetup();
 }
 
 function startRemapWizard(playerIdx) {
@@ -1075,6 +1128,17 @@ const visualState = [
 let roundLockUntil = 0;
 /** Start time of current between-round countdown (local single/multi). */
 let roundIntermissionStartAt = 0;
+
+function startLocalRoundCountdown(durationMs = ROUND_INTERMISSION_MS) {
+  roundIntermissionStartAt = Date.now();
+  roundLockUntil = roundIntermissionStartAt + durationMs;
+}
+
+function launchLocalRoundFromSetup() {
+  hideArcadeOverlay();
+  startLocalRoundCountdown();
+  showBanner(`${mode === "single" ? "Single Player" : "Local Multiplayer"} started`);
+}
 /** Smoothed x for walk animation (online); snaps to `p.x` offline. */
 const playerPrevRenderX = [220, 760];
 const ONLINE_RENDER_PREV_LERP = 0.42;
@@ -1128,10 +1192,11 @@ let localState = {
   buffPickOptions: null,
   /** Sorted id triplet for the last intermission; next pick avoids repeating the same set. */
   buffLastOfferedKey: null,
+  roundResult: null,
 };
 
 const profile = {
-  token: localStorage.getItem(authTokenKey) || "",
+  token: ACCOUNT_AUTH_DISABLED ? "" : localStorage.getItem(authTokenKey) || "",
   username: "",
   email: "",
   friends: [],
@@ -1297,12 +1362,6 @@ function setArcadeStep(step) {
         { id: "online", label: "Online (lobby)" },
       ],
     },
-    ready: {
-      index: "Step 3 of 3",
-      title: "Ready",
-      text: "Launch this round now.",
-      actions: [{ id: "launch", label: "Play Round" }],
-    },
   };
   const view = steps[step];
   if (!view) {
@@ -1404,6 +1463,27 @@ function drawFighterTopColorBand(p, baseY, idx) {
   ctx.restore();
 }
 
+function drawFighterHealthBar(p, baseY, idx) {
+  if (idx !== 0 && idx !== 1) return;
+  const maxHp = Math.max(1, playerMaxHp(p));
+  const ratio = clamp((p.health ?? maxHp) / maxHp, 0, 1);
+  const bw = 48;
+  const bh = 6;
+  const x = Math.round(p.x + PLAYER_BODY_W / 2 - bw / 2);
+  const y = Math.round(Math.max(6, baseY - 13));
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "rgba(4, 8, 18, 0.88)";
+  ctx.fillRect(x - 1, y - 1, bw + 2, bh + 2);
+  ctx.fillStyle = "#1f2937";
+  ctx.fillRect(x, y, bw, bh);
+  ctx.fillStyle = idx === 0 ? "#46aaff" : "#ff6e78";
+  ctx.fillRect(x, y, Math.round(bw * ratio), bh);
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.fillRect(x, y, Math.round(bw * ratio), 1);
+  ctx.restore();
+}
+
 function drawPlayer(p) {
   const idx = p.color === "#2f7dff" ? 0 : 1;
   const v = visualState[idx];
@@ -1500,6 +1580,7 @@ function drawPlayer(p) {
     ctx.restore();
   }
 
+  drawFighterHealthBar(p, baseY, idx);
   drawFighterTopColorBand(p, baseY, idx);
 
   if (attackPose) drawMeleeSwingIndicator(p, v, baseY);
@@ -2240,8 +2321,7 @@ function applyBuffChoice(buffId) {
   healPlayerToCap(L);
   localState.buffPickActive = false;
   hideBuffPickOverlay();
-  roundIntermissionStartAt = Date.now();
-  roundLockUntil = Date.now() + ROUND_INTERMISSION_MS;
+  startLocalRoundCountdown();
   localState.players[0].chargeStartAt = 0;
   localState.players[1].chargeStartAt = 0;
   visualState[0].charging = false;
@@ -2460,10 +2540,20 @@ function updateLocalGame() {
   if (p1.health <= 0 || p2.health <= 0) {
     const winner = p1.health <= 0 ? 1 : 0;
     const loser = winner === 0 ? 1 : 0;
+    const winnerHealth = localState.players[winner].health;
+    const loserHealth = localState.players[loser].health;
     localState.players[winner].score += 1;
     const winName = winner === 0 ? "Blue" : "Red";
     const matchOver =
       p1.score >= WINS_TO_END_MATCH || p2.score >= WINS_TO_END_MATCH;
+    localState.roundResult = {
+      winnerIdx: winner,
+      loserIdx: loser,
+      winnerHealth,
+      loserHealth,
+      winnerScore: localState.players[winner].score,
+      loserScore: localState.players[loser].score,
+    };
     if (matchOver) {
       showBanner(`${winName} wins the match!`, 3200);
       localState.round = 1;
@@ -2487,18 +2577,27 @@ function updateLocalGame() {
     p1.orbAmmo = ORB_AMMO_PER_ROUND;
     p2.orbAmmo = ORB_AMMO_PER_ROUND;
     localState.projectiles = [];
-    if (!matchOver) {
+    if (!matchOver && mode !== "single") {
       localState.buffPickLoser = loser;
       localState.buffPickActive = true;
       showBuffPickOverlay(loser);
     } else {
       localState.buffPickActive = false;
       hideBuffPickOverlay();
+      startLocalRoundCountdown();
     }
   }
 }
 
 async function api(path, method = "GET", body) {
+  if (
+    ACCOUNT_AUTH_DISABLED &&
+    (path === "/api/profile" || path === "/api/friends" || path === "/api/friends/invite")
+  ) {
+    if (method === "GET" && path === "/api/friends") return { friends: [] };
+    if (method === "GET" && path === "/api/profile") return { username: "", email: "" };
+    return { ok: false };
+  }
   const headers = { "Content-Type": "application/json" };
   if (profile.token) headers.Authorization = `Bearer ${profile.token}`;
   const res = await fetch(path, {
@@ -2522,6 +2621,7 @@ function renderFriends() {
 }
 
 async function loadProfileFromServer() {
+  if (ACCOUNT_AUTH_DISABLED) return;
   if (!profile.token) return;
   try {
     const user = await api("/api/profile");
@@ -2608,8 +2708,10 @@ function setupSocket() {
   socket.on("match:countdown", ({ seconds }) => {
     hideArcadeOverlay();
     const s = Number.isFinite(seconds) ? seconds : 3;
+    const now = Date.now();
+    localState.intermissionStartedAt = now;
+    localState.lockUntil = now + s * 1000;
     setMatchStatus(`Opponent joined. Starting in ${s}...`);
-    showBanner(`Starting in ${s}...`, 1200);
   });
 
   socket.on("match:state", (state) => {
@@ -2624,6 +2726,7 @@ function setupSocket() {
       buffPickLoser: state.buffPickLoser ?? 0,
       buffPickInputUnlocked: !!state.buffPickInputUnlocked,
       buffPickOptions: Array.isArray(state.buffPickOptions) ? state.buffPickOptions : null,
+      roundResult: state.roundResult || null,
     };
     for (let i = 0; i < 2; i += 1) {
       if (!visualState[i]) continue;
@@ -2714,6 +2817,7 @@ function localReset() {
     buffPickInputUnlocked: false,
     buffPickOptions: null,
     buffLastOfferedKey: null,
+    roundResult: null,
   };
   hideBuffPickOverlay();
   roundLockUntil = 0;
@@ -3041,14 +3145,14 @@ function setupUI() {
     if (action === "bind0_keep") {
       resetPlayerBindingsDefault(0);
       if (mode === "multi") setArcadeStep("controls_p2");
-      else setArcadeStep("ready");
+      else launchLocalRoundFromSetup();
     }
     if (action === "bind0_map") {
       startRemapWizard(0);
     }
     if (action === "bind1_keep") {
       resetPlayerBindingsDefault(1);
-      setArcadeStep("ready");
+      launchLocalRoundFromSetup();
     }
     if (action === "bind1_map") {
       startRemapWizard(1);
@@ -3064,14 +3168,6 @@ function setupUI() {
       startRemapWizardOnline();
     }
     if (action === "backMode") setArcadeStep("mode");
-    if (action === "launch") {
-      if (mode === "online") {
-        setupSocket();
-      } else {
-        hideArcadeOverlay();
-        showBanner(`${mode === "single" ? "Single Player" : "Local Multiplayer"} started`);
-      }
-    }
     if (action === "cancelOnline") {
       if (socket) socket.disconnect();
       socket = null;
@@ -3143,6 +3239,10 @@ function setupUI() {
 
 async function boot() {
   loadKeyBindings();
+  if (ACCOUNT_AUTH_DISABLED) {
+    profile.token = "";
+    localStorage.removeItem(authTokenKey);
+  }
   /* Interactive arcade before profile fetch — was awaiting and blocking `setupUI` + controls. */
   setupUI();
   setArcadeStep("welcome");

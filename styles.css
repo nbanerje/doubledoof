@@ -2,11 +2,19 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   font-family: "Trebuchet MS", "Segoe UI", sans-serif;
   background: radial-gradient(circle at top, #22293f, #121724 65%);
   color: #eaf0ff;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .app {
@@ -85,6 +93,10 @@ button {
   cursor: pointer;
   font-weight: 700;
   background: #2f416e;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
 }
 
 button:hover {
@@ -126,11 +138,17 @@ button:hover {
   display: flex;
   justify-content: center;
   align-items: flex-start;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #gameCanvas {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .buff-pick-overlay {
@@ -389,7 +407,7 @@ button:hover {
   width: min(100%, 1040px);
   height: auto;
   background: #0f1322;
-  touch-action: auto;
+  touch-action: none;
 }
 
 .round-banner {
@@ -661,6 +679,10 @@ button.lobby-decline {
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   z-index: 7;
   pointer-events: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
 }
 
 .touch-cluster {
@@ -678,6 +700,8 @@ button.lobby-decline {
   background: rgba(18, 28, 54, 0.58);
   position: relative;
   touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -706,6 +730,8 @@ button.lobby-decline {
   font-weight: 700;
   backdrop-filter: blur(2px);
   touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 

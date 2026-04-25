@@ -290,6 +290,7 @@ function createHostRoom(hostUserId, hostSocketId) {
     buffUnlockAt: 0,
     buffLastOfferedKey: null,
     blueMeleeBurstHits: 0,
+    roundResult: null,
   });
   io.to(hostSocketId).emit("match:start", { roomId, playerIndex: 0 });
   return roomId;
@@ -642,9 +643,20 @@ function updateRoom(room) {
 
   if (p0.health <= 0 || p1.health <= 0) {
     const winnerIdx = p0.health <= 0 ? 1 : 0;
+    const loserIdx = winnerIdx === 0 ? 1 : 0;
+    const winnerHealth = room.players[winnerIdx].health;
+    const loserHealth = room.players[loserIdx].health;
     room.players[winnerIdx].score += 1;
     const s0 = room.players[0].score;
     const s1 = room.players[1].score;
+    room.roundResult = {
+      winnerIdx,
+      loserIdx,
+      winnerHealth,
+      loserHealth,
+      winnerScore: room.players[winnerIdx].score,
+      loserScore: room.players[loserIdx].score,
+    };
     if (s0 >= WINS_TO_END_MATCH || s1 >= WINS_TO_END_MATCH) {
       room.round = 1;
       room.players[0].score = 0;
@@ -675,7 +687,6 @@ function updateRoom(room) {
       p.chargeStart = 0;
     });
     if (s0 < WINS_TO_END_MATCH && s1 < WINS_TO_END_MATCH) {
-      const loserIdx = winnerIdx === 0 ? 1 : 0;
       const pick = pickRandomBuffTripletServer(room.buffLastOfferedKey);
       room.buffPickActive = true;
       room.buffPickLoser = loserIdx;
@@ -700,6 +711,7 @@ setInterval(() => {
         x: p.x,
         y: p.y,
         health: p.health,
+        maxHealth: playerMaxHp(p),
         facing: p.facing,
         score: p.score,
         color: p.color,
@@ -713,6 +725,7 @@ setInterval(() => {
       buffPickLoser: room.buffPickLoser,
       buffPickInputUnlocked: room.buffPickInputUnlocked,
       buffPickOptions: room.buffPickOptions,
+      roundResult: room.roundResult,
     });
   }
 }, 1000 / 30);
@@ -739,6 +752,10 @@ io.on("connection", (socket) => {
   broadcastLobby();
 
   socket.on("lobby:list", () => {
+      const self = onlineLobby.get(socket.userId);
+      if (self) {
+        socket.emit("lobby:self", { shareName: self.shareName, userId: socket.userId });
+      }
       socket.emit(
         "lobby:players",
         [...onlineLobby.entries()].map(([userId, v]) => ({
