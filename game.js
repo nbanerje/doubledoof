@@ -12,10 +12,12 @@ const ctx = gameCanvas.getContext("2d");
 const viewCtx = viewCanvas.getContext("2d");
 
 function beginPixelGameFrame() {
+  const shake = screenShakeOffset();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, GAME_W, GAME_H);
   ctx.imageSmoothingEnabled = false;
   ctx.setTransform(GAME_W / VIEW_W, 0, 0, GAME_H / VIEW_H, 0, 0);
+  if (shake.x || shake.y) ctx.translate(shake.x, shake.y);
 }
 
 function endPixelGameFrame() {
@@ -202,8 +204,9 @@ function drawHudOnView() {
   const vw = viewCanvas.width || VIEW_W;
   const vh = viewCanvas.height || VIEW_H;
   const vc = viewCtx;
+  const shake = screenShakeOffset();
   vc.save();
-  vc.setTransform(vw / VIEW_W, 0, 0, vh / VIEW_H, 0, 0);
+  vc.setTransform(vw / VIEW_W, 0, 0, vh / VIEW_H, shake.x * (vw / VIEW_W), shake.y * (vh / VIEW_H));
   vc.imageSmoothingEnabled = true;
   const p0 = localState.players[0];
   const p1 = localState.players[1];
@@ -285,6 +288,8 @@ const BUFF_POOL = [
   "instantMaxCharge",
   "meleeLong",
   "fireBreath",
+  "freeze",
+  "groundPound",
 ];
 const BUFF_DEFS = {
   triple: { name: "Triple shot", desc: "Each charged release fires 3 orbs" },
@@ -295,6 +300,8 @@ const BUFF_DEFS = {
   instantMaxCharge: { name: "Overcharge", desc: "Shots are always full tier V" },
   meleeLong: { name: "Duelist", desc: "Melee range and swing 2× longer" },
   fireBreath: { name: "Fire Breath", desc: "Hold a mapped key to breathe scaling fire" },
+  freeze: { name: "Freeze", desc: "Orbs root enemies on hit and fire a trailing orb" },
+  groundPound: { name: "Ground Pound", desc: "Map a key to slam: same ground layer launches + 25% damage" },
 };
 
 function shuffleInPlace(a) {
@@ -310,9 +317,9 @@ function shuffleInPlace(a) {
 /** `triple` is always one of the three. Everything else: weight 1; Bottomless (infinite ammo) is rarer. */
 const BUFF_POOL_NO_TRIPLE = BUFF_POOL.filter((id) => id !== "triple");
 const BUFF_INFINITE_AMMO_RARITY = 0.12;
-
 function buffPickWeight(id) {
-  return id === "infiniteAmmo" ? BUFF_INFINITE_AMMO_RARITY : 1;
+  if (id === "infiniteAmmo") return BUFF_INFINITE_AMMO_RARITY;
+  return 1;
 }
 
 /**
@@ -374,8 +381,9 @@ const MELEE_RANGE = 48;
 const MELEE_KNOCKBACK_VX = 50;
 const STAFF_DAMAGE = 35;
 const STAFF_KNOCKBACK_VX = 70;
-const STAFF_COOLDOWN_MS = 500;
-const STAFF_SWING_FRAMES = 6;
+const STAFF_COOLDOWN_MS = 700;
+const STAFF_SWING_FRAMES = 5;
+const STAFF_SWING_ANIM_SPEED = 2.5;
 const FIRE_BREATH_RANGE = PLAYER_BODY_W * 1.5;
 const FIRE_BREATH_H = 20;
 const FIRE_BREATH_TICK_MS = 100;
@@ -384,6 +392,13 @@ const FIRE_BREATH_FRAME_MS = 24;
 const FIRE_BREATH_BASE_DAMAGE = 3;
 const FIRE_BREATH_SLOW_MULT = 0.25;
 const FIRE_BREATH_GROWTH_PER_TICK = 0.03;
+const GROUND_POUND_DAMAGE_FRACTION = 0.25;
+const GROUND_POUND_LAUNCH_VY = -14;
+const GROUND_POUND_LAYER_EPSILON = 2;
+const GROUND_POUND_SHAKE_MS = 240;
+const GROUND_POUND_SHAKE_AMPLITUDE = 7;
+const GROUND_POUND_FREEZE_MS = 3000;
+const FROZEN_VIBRATE_PX = 2;
 const DEFAULT_MAX_HP = 100;
 const TANK_BUFF_MAX_HP = 130;
 /** A match ends as soon as one side reaches this many round wins. */
@@ -396,6 +411,8 @@ const ORB_AMMO_PER_ROUND = 10;
 const AMMO_RELOAD_IDLE_MS = 5000;
 const AMMO_RELOAD_AMOUNT = 5;
 const POWER_BUFF_DAMAGE_MULT = 1.35;
+const FREEZE_HIT_ROOT_MS = 1600;
+const FREEZE_TRAIL_ORB_OFFSET = 26;
 const BINDINGS_STORAGE_KEY = "bat-duel-bindings-v1";
 
 const PERCIVAL_IDLE_URL = "./assets/percival-idle.png";
@@ -414,12 +431,12 @@ const GUY2_RUN_URLS = [
   "./assets/guy2-run-4.png",
 ];
 const GUY2_HIT_URL = "./assets/guy2-hit.png";
-const DRAGON_IDLE_URL = "./assets/dragon-idle.png";
+const DRAGON_IDLE_URL = "./assets/dragon-idle.png?v=4";
 const DRAGON_RUN_URLS = [
-  "./assets/dragon-run-1.png",
-  "./assets/dragon-run-2.png",
-  "./assets/dragon-run-3.png",
-  "./assets/dragon-run-4.png",
+  "./assets/dragon-run-1.png?v=4",
+  "./assets/dragon-run-2.png?v=4",
+  "./assets/dragon-run-3.png?v=4",
+  "./assets/dragon-run-4.png?v=4",
 ];
 const STAFF_SLAP_URLS = [
   "./assets/staff-slap-1.png",
@@ -427,7 +444,6 @@ const STAFF_SLAP_URLS = [
   "./assets/staff-slap-3.png",
   "./assets/staff-slap-4.png",
   "./assets/staff-slap-5.png",
-  "./assets/staff-slap-6.png",
 ];
 const MELEE_SWORD_URL = "./assets/melee-sword.png";
 const FIRE_BREATH_RIGHT_URL = "./assets/fire-breath-right-sheet.png";
@@ -535,9 +551,66 @@ function keyPercivalToCanvas(img) {
   return { canvas: c, d, iw, ih };
 }
 
+/**
+ * Staff frames use a strict corner-color key so only the maroon plate gets removed.
+ * Remaining pixels are forced opaque to avoid a washed/translucent staff look.
+ */
+function keyStaffToCanvas(img) {
+  const iw = img.naturalWidth;
+  const ih = img.naturalHeight;
+  if (!iw || !ih) return null;
+  const c = document.createElement("canvas");
+  c.width = iw;
+  c.height = ih;
+  const c2 = c.getContext("2d", { willReadFrequently: true });
+  if (!c2) return null;
+  c2.imageSmoothingEnabled = false;
+  c2.drawImage(img, 0, 0);
+  const im = c2.getImageData(0, 0, iw, ih);
+  const d = im.data;
+  const c00 = 0;
+  const c10 = (iw - 1) * 4;
+  const c01 = (ih - 1) * iw * 4;
+  const c11 = ((ih - 1) * iw + (iw - 1)) * 4;
+  const ba = (d[c00 + 3] + d[c10 + 3] + d[c01 + 3] + d[c11 + 3]) / 4;
+  if (ba < 8) return { canvas: c, d, iw, ih };
+  const br = (d[c00] + d[c10] + d[c01] + d[c11]) / 4;
+  const bg = (d[c00 + 1] + d[c10 + 1] + d[c01 + 1] + d[c11 + 1]) / 4;
+  const bb = (d[c00 + 2] + d[c10 + 2] + d[c01 + 2] + d[c11 + 2]) / 4;
+  const bgThresh = 26 * 26;
+  for (let p = 0; p < d.length; p += 4) {
+    const r = d[p] - br;
+    const g = d[p + 1] - bg;
+    const b = d[p + 2] - bb;
+    if (r * r + g * g + b * b < bgThresh) {
+      d[p + 3] = 0;
+    } else if (d[p + 3] > 0) {
+      d[p + 3] = 255;
+    }
+  }
+  c2.putImageData(im, 0, 0);
+  return { canvas: c, d, iw, ih };
+}
+
 /** Single idle: tight crop. */
 function buildPercivalIdleBlit(img) {
   const k = keyPercivalToCanvas(img);
+  if (!k) return null;
+  const { canvas, d, iw, ih } = k;
+  const bb = globalAlphaBbox(d, iw, ih);
+  if (!bb) return null;
+  return {
+    canvas,
+    cx: bb.minX,
+    cy: bb.minY,
+    cw: bb.maxX - bb.minX + 1,
+    ch: bb.maxY - bb.minY + 1,
+  };
+}
+
+/** Staff frames: maroon keyed out, but sprite pixels stay fully opaque. */
+function buildStaffSlapBlit(img) {
+  const k = keyStaffToCanvas(img);
   if (!k) return null;
   const { canvas, d, iw, ih } = k;
   const bb = globalAlphaBbox(d, iw, ih);
@@ -666,7 +739,7 @@ function tryInitStaffSlap() {
   }
   const frames = [];
   for (let i = 0; i < staffSlapImages.length; i += 1) {
-    const b = buildPercivalIdleBlit(staffSlapImages[i]);
+    const b = buildStaffSlapBlit(staffSlapImages[i]);
     if (!b) return;
     frames.push(b);
   }
@@ -688,6 +761,7 @@ function defaultKeyBindings() {
       charge: "KeyS",
       attack: "KeyS",
       fire: "",
+      groundPound: "",
     },
     p1: {
       left: "ArrowLeft",
@@ -697,6 +771,7 @@ function defaultKeyBindings() {
       charge: "ArrowDown",
       attack: "ArrowDown",
       fire: "",
+      groundPound: "",
     },
     online: {
       left: "KeyA",
@@ -705,6 +780,7 @@ function defaultKeyBindings() {
       melee: "KeyF",
       orb: "KeyS",
       fire: "",
+      groundPound: "",
     },
   };
 }
@@ -726,12 +802,15 @@ function loadKeyBindings() {
     if (!keyBindings.p1.melee) keyBindings.p1.melee = def.p1.melee;
     if (!keyBindings.p1.charge) keyBindings.p1.charge = def.p1.charge;
     if (keyBindings.p0.fire == null) keyBindings.p0.fire = def.p0.fire;
+    if (keyBindings.p0.groundPound == null) keyBindings.p0.groundPound = def.p0.groundPound;
     if (keyBindings.p1.fire == null) keyBindings.p1.fire = def.p1.fire;
+    if (keyBindings.p1.groundPound == null) keyBindings.p1.groundPound = def.p1.groundPound;
     keyBindings.p0.attack = keyBindings.p0.charge;
     keyBindings.p1.attack = keyBindings.p1.charge;
     if (!keyBindings.online.melee) keyBindings.online.melee = def.online.melee;
     if (!keyBindings.online.orb) keyBindings.online.orb = keyBindings.online.attack || def.online.orb;
     if (keyBindings.online.fire == null) keyBindings.online.fire = def.online.fire;
+    if (keyBindings.online.groundPound == null) keyBindings.online.groundPound = def.online.groundPound;
   } catch (_) {
     /* ignore */
   }
@@ -758,6 +837,7 @@ function bindingCodesFlat() {
   add(p0.charge);
   add(p0.attack);
   add(p0.fire);
+  add(p0.groundPound);
   add(p1.left);
   add(p1.right);
   add(p1.jump);
@@ -765,12 +845,14 @@ function bindingCodesFlat() {
   add(p1.charge);
   add(p1.attack);
   add(p1.fire);
+  add(p1.groundPound);
   add(online.left);
   add(online.right);
   add(online.jump);
   add(online.melee);
   add(online.orb);
   add(online.fire);
+  add(online.groundPound);
   return s;
 }
 
@@ -1366,6 +1448,8 @@ const visualState = [
     shootFlashUntil: 0,
     /** @type {number | undefined} last `p.x` for run animation (blue) */
     prevDrawX: undefined,
+    dragonRunStartedAt: 0,
+    dragonWasRunning: false,
   },
   {
     recoilUntil: 0,
@@ -1379,6 +1463,8 @@ const visualState = [
     shootFlashUntil: 0,
     /** @type {number | undefined} last `p.x` for run animation (red) */
     prevDrawX: undefined,
+    dragonRunStartedAt: 0,
+    dragonWasRunning: false,
   },
 ];
 let roundLockUntil = 0;
@@ -1487,6 +1573,32 @@ const touchState = {
   prevOrb: false,
   prevFire: false,
 };
+
+const screenShakeState = {
+  until: 0,
+  amplitude: 0,
+};
+
+function triggerScreenShake(durationMs = GROUND_POUND_SHAKE_MS, amplitude = GROUND_POUND_SHAKE_AMPLITUDE) {
+  const now = performance.now();
+  screenShakeState.until = Math.max(screenShakeState.until, now + Math.max(0, durationMs));
+  screenShakeState.amplitude = Math.max(screenShakeState.amplitude, Math.max(0, amplitude));
+}
+
+function screenShakeOffset() {
+  const now = performance.now();
+  if (now >= screenShakeState.until || screenShakeState.amplitude <= 0) {
+    screenShakeState.amplitude = 0;
+    return { x: 0, y: 0 };
+  }
+  const remaining = Math.max(0, (screenShakeState.until - now) / Math.max(1, GROUND_POUND_SHAKE_MS));
+  const amp = screenShakeState.amplitude * remaining;
+  const t = now * 0.095;
+  return {
+    x: Math.sin(t * 1.8) * amp,
+    y: Math.cos(t * 2.3) * amp * 0.65,
+  };
+}
 
 function onlineControlsFromInput() {
   const ok = onlineK();
@@ -1686,27 +1798,19 @@ function drawMeleeSwingIndicator(p, v, baseY) {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   if (weapon === "staff" && staffSlap?.frames?.length >= STAFF_SWING_FRAMES) {
-    const frameIdx = Math.min(STAFF_SWING_FRAMES - 1, Math.floor(swingT * STAFF_SWING_FRAMES));
+    const animT = clamp(swingT * STAFF_SWING_ANIM_SPEED, 0, 0.999);
+    const frameIdx = Math.min(STAFF_SWING_FRAMES - 1, Math.floor(animT * STAFF_SWING_FRAMES));
     const bl = staffSlap.frames[frameIdx];
-    const frameT = (frameIdx + 0.5) / STAFF_SWING_FRAMES;
-    const s = 72 / Math.max(1, bl.cw);
+    const s = ((72 / Math.max(1, bl.cw)) / 1.5) * 1.5;
     const w = bl.cw * s;
     const h = bl.ch * s;
-    const handX = hx + fac * 6;
+    const handX = hx + fac * 22;
     const handY = Math.floor(baseY + 20);
-    const ang = (0.62 - frameT) * Math.PI * 0.72;
     ctx.save();
     ctx.translate(handX, handY);
     ctx.scale(fac, 1);
-    ctx.rotate(ang);
-    ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -8, -h * 0.5, w, h);
+    ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -8 - w * 0.1, -h * 0.5, w, h);
     ctx.restore();
-    for (let i = 1; i < steps + 4; i += 1) {
-      const px = hx + fac * i * 3;
-      const py = hy + Math.sin((i / (steps + 4)) * Math.PI + frameIdx) * 4;
-      ctx.fillStyle = `rgba(245, 210, 150, ${0.08 + swingT * 0.16})`;
-      ctx.fillRect(Math.floor(px), Math.floor(py), 2, 2);
-    }
   } else if (meleeSwordBlit) {
     const bl = meleeSwordBlit;
     const s = Math.max(1.85, 17 / bl.ch) / 13.2;
@@ -1744,7 +1848,7 @@ function drawMeleeSwingIndicator(p, v, baseY) {
       ctx.fillRect(Math.floor(px), Math.floor(py), 2, 2);
     }
   }
-  if (active) {
+  if (active && weapon !== "staff") {
     const tip = hx + fac * reach;
     ctx.fillStyle = `rgba(255, 255, 255, ${0.35 + swingT * 0.25})`;
     ctx.fillRect(Math.floor(tip), hy - 8, 3, 3);
@@ -1788,6 +1892,32 @@ function drawFighterHealthBar(p, baseY, idx) {
   ctx.restore();
 }
 
+function dragonRunInputDirection(idx, p, v) {
+  if (mode === "online") {
+    if (idx === playerIndex) {
+      const ok = onlineK();
+      const left = keys.has(ok.left) || touchState.left;
+      const right = keys.has(ok.right) || touchState.right;
+      if (left !== right) return left ? -1 : 1;
+      if (Math.abs(p.vx || 0) > 0.1) return Math.sign(p.vx);
+      return 0;
+    }
+    if (v.prevDrawX == null || Math.abs(p.x - v.prevDrawX) <= 0.2) return 0;
+    return Math.sign(p.x - v.prevDrawX);
+  }
+
+  if (idx === 0 || mode === "multi") {
+    const b = idx === 0 ? keyBindings.p0 : keyBindings.p1;
+    const left = keys.has(b.left) || (idx === 0 && touchState.left);
+    const right = keys.has(b.right) || (idx === 0 && touchState.right);
+    if (left !== right) return left ? -1 : 1;
+    if (Math.abs(p.vx || 0) > 0.1) return Math.sign(p.vx);
+    return 0;
+  }
+
+  return Math.abs(p.vx || 0) > 0.1 ? Math.sign(p.vx) : 0;
+}
+
 function drawPlayer(p) {
   const idx = p.color === "#2f7dff" ? 0 : 1;
   const v = visualState[idx];
@@ -1798,6 +1928,9 @@ function drawPlayer(p) {
   v.prevHealth = p.health;
   const recoil = now < v.recoilUntil ? 1 : 0;
   const attackPose = now < v.attackUntil ? 1 : 0;
+  const frozen = (p.freezeRootUntil || 0) > now;
+  const freezeVibeX = frozen ? Math.round(Math.sin(now * 0.12) * FROZEN_VIBRATE_PX) : 0;
+  const freezeVibeY = frozen ? Math.round(Math.cos(now * 0.17) * (FROZEN_VIBRATE_PX * 0.5)) : 0;
 
   const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
   const px = Math.floor(p.x);
@@ -1805,15 +1938,21 @@ function drawPlayer(p) {
   const characterId = selectedCharacterForRender(idx);
 
   if (characterId === "dragon" && dragonIdleBlit) {
-    const movingH =
-      mode === "online"
-        ? v.prevDrawX != null && Math.abs(p.x - v.prevDrawX) > 0.2
-        : Math.abs(p.vx) > 0.1;
+    const runDir = dragonRunInputDirection(idx, p, v);
+    const movingH = runDir !== 0;
+    const dragonFacing = movingH ? runDir : p.facing || 1;
+    if (movingH && !v.dragonWasRunning) {
+      v.dragonRunStartedAt = performance.now();
+    } else if (!movingH) {
+      v.dragonRunStartedAt = 0;
+    }
+    v.dragonWasRunning = movingH;
     const useRun = dragonRun != null && dragonRun.frames.length >= 4 && movingH;
     const bl = useRun
       ? (() => {
           const f = dragonRun.frames;
-          const fi = Math.floor(performance.now() * 0.012) % f.length;
+          const elapsed = performance.now() - (v.dragonRunStartedAt || performance.now());
+          const fi = Math.floor(elapsed * 0.012) % f.length;
           const fr = f[fi];
           return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
         })()
@@ -1821,16 +1960,16 @@ function drawPlayer(p) {
     const s = Math.min((PLAYER_BODY_W * 1.14) / bl.cw, (PLAYER_BODY_H * 1.04) / bl.ch);
     const dw = bl.cw * s;
     const dh = bl.ch * s;
-    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1);
-    const footY = baseY + PLAYER_BODY_H;
+    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1) + freezeVibeX;
+    const footY = baseY + PLAYER_BODY_H + freezeVibeY;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     if (recoil) {
       ctx.fillStyle = "rgba(255, 60, 60, 0.22)";
-      ctx.fillRect(p.x, baseY, PLAYER_BODY_W, PLAYER_BODY_H);
+      ctx.fillRect(p.x + freezeVibeX, baseY + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
     }
     ctx.translate(footX, footY);
-    ctx.scale(p.facing || 1, 1);
+    ctx.scale(dragonFacing, 1);
     ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -dw / 2, -dh, dw, dh);
     ctx.restore();
   } else if (idx === 0 && percivalIdleBlit) {
@@ -1854,13 +1993,13 @@ function drawPlayer(p) {
     const s = Math.min((PLAYER_BODY_W * 0.96) / bl.cw, (PLAYER_BODY_H * 0.99) / bl.ch);
     const dw = bl.cw * s;
     const dh = bl.ch * s;
-    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1);
-    const footY = baseY + PLAYER_BODY_H;
+    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1) + freezeVibeX;
+    const footY = baseY + PLAYER_BODY_H + freezeVibeY;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     if (recoil && !useHit) {
       ctx.fillStyle = "rgba(255, 60, 60, 0.22)";
-      ctx.fillRect(p.x, baseY, PLAYER_BODY_W, PLAYER_BODY_H);
+      ctx.fillRect(p.x + freezeVibeX, baseY + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
     }
     ctx.translate(footX, footY);
     ctx.scale(p.facing || 1, 1);
@@ -1887,13 +2026,13 @@ function drawPlayer(p) {
     const s = Math.min((PLAYER_BODY_W * 0.96) / bl.cw, (PLAYER_BODY_H * 0.99) / bl.ch);
     const dw = bl.cw * s;
     const dh = bl.ch * s;
-    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1);
-    const footY = baseY + PLAYER_BODY_H;
+    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1) + freezeVibeX;
+    const footY = baseY + PLAYER_BODY_H + freezeVibeY;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     if (recoil && !useHit) {
       ctx.fillStyle = "rgba(255, 60, 60, 0.22)";
-      ctx.fillRect(p.x, baseY, PLAYER_BODY_W, PLAYER_BODY_H);
+      ctx.fillRect(p.x + freezeVibeX, baseY + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
     }
     ctx.translate(footX, footY);
     ctx.scale(p.facing || 1, 1);
@@ -1904,12 +2043,12 @@ function drawPlayer(p) {
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = "#0a0a0a";
-    ctx.fillRect(px - 2, py - 2, PLAYER_BODY_W + 4, PLAYER_BODY_H + 4);
+    ctx.fillRect(px - 2 + freezeVibeX, py - 2 + freezeVibeY, PLAYER_BODY_W + 4, PLAYER_BODY_H + 4);
     ctx.fillStyle = body;
-    ctx.fillRect(px, py, PLAYER_BODY_W, PLAYER_BODY_H);
+    ctx.fillRect(px + freezeVibeX, py + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
     if (recoil) {
       ctx.fillStyle = "rgba(255,60,60,0.35)";
-      ctx.fillRect(px, py, PLAYER_BODY_W, PLAYER_BODY_H);
+      ctx.fillRect(px + freezeVibeX, py + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
     }
     ctx.restore();
   }
@@ -2056,6 +2195,23 @@ function drawProjectile(s) {
   for (let k = 1; k <= trail; k += 1) {
     ctx.fillStyle = `rgba(255,255,255,${0.35 - k * 0.08})`;
     ctx.fillRect(x - back * k * 2, y + Math.floor(h / 3), 2, 2);
+  }
+  if (s.freezeTriangleUntil && Date.now() < s.freezeTriangleUntil) {
+    const dir = s.vx >= 0 ? 1 : -1;
+    const tipX = x + (dir > 0 ? w + 18 : -18);
+    const midY = y + Math.floor(h / 2);
+    const baseX = x + (dir > 0 ? w + 6 : -6);
+    const halfH = Math.max(6, Math.floor(h * 1.05));
+    ctx.beginPath();
+    ctx.moveTo(tipX, midY);
+    ctx.lineTo(baseX, midY - halfH);
+    ctx.lineTo(baseX, midY + halfH);
+    ctx.closePath();
+    ctx.fillStyle = "#3eb5ff";
+    ctx.fill();
+    ctx.strokeStyle = "#bde9ff";
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -2567,12 +2723,14 @@ function fireProjectile(attackerIdx, override = null) {
   }
   const mult = attacker.damageMult != null ? attacker.damageMult : 1;
   const dmg = Math.round(damage * mult);
+  const freezeTriangleUntil = attacker.freezeShot ? Date.now() + FREEZE_HIT_ROOT_MS : 0;
+  const freezeRootMs = attacker.freezeShot ? FREEZE_HIT_ROOT_MS : 0;
   const cy = attacker.y + Math.floor(PLAYER_BODY_H * 0.42) + (6 - h) / 2;
   const baseX = attacker.x + Math.floor(PLAYER_BODY_W * 0.62) + 2;
   const target = attackerIdx === 0 ? 1 : 0;
-  const pushShot = (vx, vy) => {
+  const pushShot = (vx, vy, xOffset = 0) => {
     localState.projectiles.push({
-      x: baseX,
+      x: baseX + xOffset,
       y: cy,
       w,
       h,
@@ -2580,6 +2738,8 @@ function fireProjectile(attackerIdx, override = null) {
       vy: vy ?? 0,
       target,
       damage: dmg,
+      freezeTriangleUntil,
+      freezeRootMs,
     });
   };
   if (attacker.tripleShot) {
@@ -2592,6 +2752,10 @@ function fireProjectile(attackerIdx, override = null) {
     });
   } else {
     pushShot(attacker.facing * speed, 0);
+  }
+  if (attacker.freezeShot) {
+    const dir = attacker.facing >= 0 ? 1 : -1;
+    pushShot(attacker.facing * speed, 0, -dir * FREEZE_TRAIL_ORB_OFFSET);
   }
   if (!attacker.infiniteAmmo) {
     attacker.orbAmmo = ammo - orbCost;
@@ -2632,6 +2796,10 @@ function clearCombatBuffsFromPlayers() {
     delete p.meleeSwingScale;
     delete p.fireBreath;
     delete p.fireBreathing;
+    delete p.freezeShot;
+    delete p.groundPound;
+    delete p.groundPoundUsesLeft;
+    delete p.freezeRootUntil;
     delete p.fireStartAt;
     delete p.fireNextDamageAt;
   }
@@ -2708,6 +2876,7 @@ function syncRedThousandHpAfterLocalReset() {
 }
 
 let fireBindState = { active: false, playerIdx: 0, online: false, onDone: null };
+let groundPoundBindState = { active: false, playerIdx: 0, online: false, onDone: null };
 
 function finishFireBreathKeyBind() {
   const done = fireBindState.onDone;
@@ -2740,7 +2909,7 @@ function startFireBreathKeyBind(playerIdx, online = false, onDone = null) {
     if (typeof onDone === "function") onDone();
     return;
   }
-  if (fireBindState.active) return;
+  if (fireBindState.active || groundPoundBindState.active) return;
   fireBindState = { active: true, playerIdx, online, onDone };
   renderFireBreathBindPrompt();
   window.addEventListener("keydown", onFireBreathBindKeydown, true);
@@ -2766,6 +2935,92 @@ function onFireBreathBindKeydown(e) {
   saveKeyBindings();
   showBanner(`Fire Breath mapped to ${formatKeyLabel(code)}`, 2200);
   finishFireBreathKeyBind();
+}
+
+function finishGroundPoundKeyBind() {
+  const done = groundPoundBindState.onDone;
+  groundPoundBindState = { active: false, playerIdx: 0, online: false, onDone: null };
+  window.removeEventListener("keydown", onGroundPoundBindKeydown, true);
+  hideArcadeOverlay();
+  if (typeof done === "function") done();
+}
+
+function renderGroundPoundBindPrompt(message = "") {
+  arcadeStep = "ground_pound_bind";
+  teardownRemapWizard();
+  clearArcadeExtra();
+  arcadeActionsEl.classList.remove("arcade-actions--char-pick");
+  stepLabelEl.textContent = "Ground Pound";
+  arcadeTitleEl.textContent = "Map Ground Pound";
+  arcadeTextEl.textContent = "Press the key you want to use for Ground Pound. The round is paused until you choose a key.";
+  arcadeActionsEl.innerHTML = "";
+  if (arcadeExtraEl) {
+    arcadeExtraEl.innerHTML = message
+      ? `<p class="bind-hint">${escapeHtml(message)}</p><p class="bind-muted">Pick a key that is not already used by movement, jump, melee, orb, or Fire Breath.</p>`
+      : `<p class="bind-muted">Choose a new unused key. Existing controls cannot be reused.</p>`;
+  }
+  overlayEl.classList.remove("hidden");
+}
+
+function startGroundPoundKeyBind(playerIdx, online = false, onDone = null) {
+  if (touchState.enabled) {
+    if (typeof onDone === "function") onDone();
+    return;
+  }
+  if (groundPoundBindState.active || fireBindState.active) return;
+  groundPoundBindState = { active: true, playerIdx, online, onDone };
+  renderGroundPoundBindPrompt();
+  window.addEventListener("keydown", onGroundPoundBindKeydown, true);
+}
+
+function onGroundPoundBindKeydown(e) {
+  if (!groundPoundBindState.active) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const code = e.code;
+  if (!code || code === "Escape") return;
+  if (bindingCodesFlat().has(code)) {
+    renderGroundPoundBindPrompt(`${formatKeyLabel(code)} is already used. Pick another key.`);
+    return;
+  }
+  if (groundPoundBindState.online) {
+    keyBindings.online.groundPound = code;
+  } else if (groundPoundBindState.playerIdx === 0) {
+    keyBindings.p0.groundPound = code;
+  } else {
+    keyBindings.p1.groundPound = code;
+  }
+  saveKeyBindings();
+  showBanner(`Ground Pound mapped to ${formatKeyLabel(code)}`, 2200);
+  finishGroundPoundKeyBind();
+}
+
+function groundedLayerY(p) {
+  if (!p?.onGround) return null;
+  return Math.round(getPlayerBaseY(p) + PLAYER_BODY_H);
+}
+
+function triggerGroundPoundLocal(attackerIdx) {
+  if (Date.now() < roundLockUntil) return false;
+  const attacker = localState.players[attackerIdx];
+  if (!attacker?.groundPound) return false;
+  const usesLeft = Number.isFinite(attacker.groundPoundUsesLeft) ? attacker.groundPoundUsesLeft : 0;
+  if (usesLeft <= 0) return false;
+  attacker.groundPoundUsesLeft = usesLeft - 1;
+  triggerScreenShake();
+  const defender = localState.players[1 - attackerIdx];
+  const atkLayer = groundedLayerY(attacker);
+  const defLayer = groundedLayerY(defender);
+  if (atkLayer == null || defLayer == null || Math.abs(atkLayer - defLayer) > GROUND_POUND_LAYER_EPSILON) {
+    return true;
+  }
+  const dmg = Math.max(1, Math.round(playerMaxHp(defender) * GROUND_POUND_DAMAGE_FRACTION));
+  defender.health = clamp(defender.health - dmg, 0, playerMaxHp(defender));
+  defender.vy = Math.min(defender.vy || 0, GROUND_POUND_LAUNCH_VY);
+  defender.freezeRootUntil = Math.max(defender.freezeRootUntil || 0, Date.now() + GROUND_POUND_FREEZE_MS);
+  defender.onGround = false;
+  defender.jumpsUsed = Math.max(defender.jumpsUsed || 0, 1);
+  return true;
 }
 
 function startFireBreathLocal(idx) {
@@ -2813,6 +3068,10 @@ function applyBuffChoice(buffId) {
       startFireBreathKeyBind(playerIndex, true, () => {
         if (socket && roomId) socket.emit("fire:bind:done");
       });
+    } else if (buffId === "groundPound") {
+      startGroundPoundKeyBind(playerIndex, true, () => {
+        if (socket && roomId) socket.emit("ground:bind:done");
+      });
     }
     return;
   }
@@ -2841,6 +3100,11 @@ function applyBuffChoice(buffId) {
     L.meleeSwingScale = (L.meleeSwingScale != null ? L.meleeSwingScale : 1) * 2;
   } else if (buffId === "fireBreath") {
     L.fireBreath = true;
+  } else if (buffId === "freeze") {
+    L.freezeShot = true;
+  } else if (buffId === "groundPound") {
+    L.groundPound = true;
+    L.groundPoundUsesLeft = 2;
   }
   healPlayerToCap(L);
   localState.buffPickActive = false;
@@ -2854,6 +3118,10 @@ function applyBuffChoice(buffId) {
   };
   if (buffId === "fireBreath") {
     startFireBreathKeyBind(loser, false, finishIntermission);
+    return;
+  }
+  if (buffId === "groundPound") {
+    startGroundPoundKeyBind(loser, false, finishIntermission);
     return;
   }
   finishIntermission();
@@ -2958,6 +3226,10 @@ function updateLocalGame() {
 
   const p1 = localState.players[0];
   const p2 = localState.players[1];
+  const p1Rooted = (p1.freezeRootUntil || 0) > now;
+  const p2Rooted = (p2.freezeRootUntil || 0) > now;
+  if (p1Rooted) p1.vx = 0;
+  if (p2Rooted) p2.vx = 0;
   if (p1.fireBreathing) p1.vx = 0;
   if (p2.fireBreathing) p2.vx = 0;
   const p1InputLeft = keys.has(b0.left) || touchState.left;
@@ -2966,10 +3238,10 @@ function updateLocalGame() {
   const p2InputRight = mode === "multi" ? keys.has(b1.right) : false;
   if (p1.fireBreathing && p1InputLeft !== p1InputRight) p1.facing = p1InputRight ? 1 : -1;
   if (p2.fireBreathing && p2InputLeft !== p2InputRight) p2.facing = p2InputRight ? 1 : -1;
-  const p1Left = !p1.fireBreathing && p1InputLeft;
-  const p1Right = !p1.fireBreathing && p1InputRight;
-  const p2Left = !p2.fireBreathing && p2InputLeft;
-  const p2Right = !p2.fireBreathing && p2InputRight;
+  const p1Left = !p1.fireBreathing && !p1Rooted && p1InputLeft;
+  const p1Right = !p1.fireBreathing && !p1Rooted && p1InputRight;
+  const p2Left = !p2.fireBreathing && !p2Rooted && p2InputLeft;
+  const p2Right = !p2.fireBreathing && !p2Rooted && p2InputRight;
   const p1MoveSpeed = MOVE_SPEED * (playerInEnemyFire(0) ? FIRE_BREATH_SLOW_MULT : 1);
   const p2MoveSpeed = MOVE_SPEED * (playerInEnemyFire(1) ? FIRE_BREATH_SLOW_MULT : 1);
 
@@ -3071,6 +3343,10 @@ function updateLocalGame() {
     });
     if (hit) {
       target.health = clamp(target.health - shot.damage, 0, playerMaxHp(target));
+      if (shot.freezeRootMs) {
+        target.freezeRootUntil = Math.max(target.freezeRootUntil || 0, Date.now() + shot.freezeRootMs);
+        target.vx = 0;
+      }
       shot.dead = true;
     }
     if (shot.x < -50 || shot.x > VIEW_W + 50 || shot.y < -80 || shot.y > VIEW_H + 40) {
@@ -3125,6 +3401,8 @@ function updateLocalGame() {
     p2.fireStartAt = 0;
     p1.fireNextDamageAt = 0;
     p2.fireNextDamageAt = 0;
+    if (p1.groundPound) p1.groundPoundUsesLeft = 2;
+    if (p2.groundPound) p2.groundPoundUsesLeft = 2;
     localState.projectiles = [];
     if (!matchOver && mode !== "single") {
       localState.buffPickLoser = loser;
@@ -3285,6 +3563,11 @@ function setupSocket() {
           if (socket && roomId) socket.emit("fire:bind:done");
         });
       }
+      if (p?.groundPound && i === playerIndex && !touchState.enabled && !onlineK().groundPound) {
+        startGroundPoundKeyBind(playerIndex, true, () => {
+          if (socket && roomId) socket.emit("ground:bind:done");
+        });
+      }
     });
     for (let i = 0; i < 2; i += 1) {
       if (!visualState[i]) continue;
@@ -3394,6 +3677,8 @@ function localReset() {
     chargeKeyDownAt: 0,
     shootFlashUntil: 0,
     prevDrawX: undefined,
+    dragonRunStartedAt: 0,
+    dragonWasRunning: false,
   };
   visualState[1] = {
     recoilUntil: 0,
@@ -3406,6 +3691,8 @@ function localReset() {
     chargeKeyDownAt: 0,
     shootFlashUntil: 0,
     prevDrawX: undefined,
+    dragonRunStartedAt: 0,
+    dragonWasRunning: false,
   };
   syncRedThousandHpAfterLocalReset();
 }
@@ -3447,8 +3734,14 @@ window.addEventListener("keydown", (e) => {
     if (localState.players[0]?.fireBreath && b0.fire && e.code === b0.fire && !e.repeat) {
       startFireBreathLocal(0);
     }
+    if (localState.players[0]?.groundPound && b0.groundPound && e.code === b0.groundPound && !e.repeat) {
+      triggerGroundPoundLocal(0);
+    }
     if (mode === "multi" && localState.players[1]?.fireBreath && b1.fire && e.code === b1.fire && !e.repeat) {
       startFireBreathLocal(1);
+    }
+    if (mode === "multi" && localState.players[1]?.groundPound && b1.groundPound && e.code === b1.groundPound && !e.repeat) {
+      triggerGroundPoundLocal(1);
     }
     if (e.code === p0FireKey() && !visualState[0].charging) {
       if (Date.now() >= roundLockUntil) {
@@ -3484,6 +3777,17 @@ window.addEventListener("keydown", (e) => {
     }
     if (localState.players[playerIndex]?.fireBreath && ok.fire && e.code === ok.fire && !e.repeat && !onlineIntermissionActive()) {
       socket.emit("match:input", onlineInputPayload("fireStart", controls));
+    }
+    if (
+      localState.players[playerIndex]?.groundPound &&
+      (localState.players[playerIndex]?.groundPoundUsesLeft || 0) > 0 &&
+      ok.groundPound &&
+      e.code === ok.groundPound &&
+      !e.repeat &&
+      !onlineIntermissionActive()
+    ) {
+      triggerScreenShake();
+      socket.emit("match:input", onlineInputPayload("groundPound", controls));
     }
     socket.emit("match:input", onlineInputPayload(null, controls));
   }

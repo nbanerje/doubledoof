@@ -28,13 +28,15 @@ const MELEE_RANGE = 48;
 const MELEE_KNOCKBACK_PX = 50;
 const STAFF_DAMAGE = 35;
 const STAFF_KNOCKBACK_PX = 70;
-const STAFF_COOLDOWN_MS = 500;
+const STAFF_COOLDOWN_MS = 1000;
 const WINS_TO_END_MATCH = 5;
 const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
 const ORB_AMMO_PER_ROUND = 10;
 const AMMO_RELOAD_IDLE_MS = 5000;
 const AMMO_RELOAD_AMOUNT = 5;
+const FREEZE_HIT_ROOT_MS = 1600;
+const FREEZE_TRAIL_ORB_OFFSET = 26;
 const CHEAT_BLUE_MELEE_BURST_DAMAGE = 1000;
 const CHEAT_BLUE_MELEE_BURST_HITS = 5;
 const VIEW_W = 1040;
@@ -47,13 +49,31 @@ const CHARGE_AIR_GRAVITY_MULT = 0.26;
 const JUMP_VELOCITY = -12.5;
 const POWER_BUFF_DAMAGE_MULT = 1.35;
 const TANK_BUFF_MAX_HP = 130;
-const BUFF_POOL = ["triple", "tank", "power", "infiniteJumps", "infiniteAmmo", "instantMaxCharge", "meleeLong", "fireBreath"];
+const BUFF_POOL = [
+  "triple",
+  "tank",
+  "power",
+  "infiniteJumps",
+  "infiniteAmmo",
+  "instantMaxCharge",
+  "meleeLong",
+  "fireBreath",
+  "freeze",
+  "groundPound",
+];
+function buffPickWeight(id) {
+  return 1;
+}
 const FIRE_BREATH_RANGE = PLAYER_BODY_W * 1.5;
 const FIRE_BREATH_H = 20;
 const FIRE_BREATH_TICK_MS = 100;
 const FIRE_BREATH_BASE_DAMAGE = 3;
 const FIRE_BREATH_SLOW_MULT = 0.25;
 const FIRE_BREATH_GROWTH_PER_TICK = 0.03;
+const GROUND_POUND_DAMAGE_FRACTION = 0.25;
+const GROUND_POUND_LAUNCH_VY = -14;
+const GROUND_POUND_LAYER_EPSILON = 2;
+const GROUND_POUND_FREEZE_MS = 3000;
 const LEVEL_PLATFORMS = [
   [
     { x: 140, y: 490, w: 180, h: 14 },
@@ -186,17 +206,32 @@ function playerMaxHp(p) {
 }
 
 function pickRandomBuffTripletServer(lastKey) {
-  for (let i = 0; i < 40; i += 1) {
-    const arr = [...BUFF_POOL];
-    for (let j = arr.length - 1; j > 0; j -= 1) {
-      const k = Math.floor(Math.random() * (j + 1));
-      [arr[j], arr[k]] = [arr[k], arr[j]];
+  const pickWeightedWithoutReplacement = (count) => {
+    const pool = [...BUFF_POOL];
+    const out = [];
+    while (out.length < count && pool.length) {
+      let wSum = 0;
+      for (const id of pool) wSum += buffPickWeight(id);
+      let r = Math.random() * wSum;
+      let chosenIdx = pool.length - 1;
+      for (let i = 0; i < pool.length; i += 1) {
+        r -= buffPickWeight(pool[i]);
+        if (r <= 0) {
+          chosenIdx = i;
+          break;
+        }
+      }
+      out.push(pool[chosenIdx]);
+      pool.splice(chosenIdx, 1);
     }
-    const triplet = arr.slice(0, 3);
+    return out;
+  };
+  for (let i = 0; i < 40; i += 1) {
+    const triplet = pickWeightedWithoutReplacement(3);
     const key = [...triplet].sort().join("|");
     if (!lastKey || key !== lastKey) return { triplet, key };
   }
-  const triplet = BUFF_POOL.slice(0, 3);
+  const triplet = pickWeightedWithoutReplacement(3);
   return { triplet, key: [...triplet].sort().join("|") };
 }
 
@@ -209,7 +244,17 @@ function applyBuffToPlayerOnline(player, buffId) {
   else if (buffId === "instantMaxCharge") player.instantMaxCharge = true;
   else if (buffId === "meleeLong") player.meleeRangeScale = 2;
   else if (buffId === "fireBreath") player.fireBreath = true;
+  else if (buffId === "freeze") player.freezeShot = true;
+  else if (buffId === "groundPound") {
+    player.groundPound = true;
+    player.groundPoundUsesLeft = 2;
+  }
   player.health = playerMaxHp(player);
+}
+
+function groundedLayerY(p) {
+  if (!p?.onGround) return null;
+  return Math.round(p.y + PLAYER_BODY_H);
 }
 const DB_URL = process.env.DB_URL || process.env.DATABASE_URL;
 if (!DB_URL) {
@@ -621,6 +666,7 @@ function updateRoom(room) {
     const left = !!p.controls.left;
     const right = !!p.controls.right;
     const jump = !!p.controls.jump;
+    const rooted = (p.freezeRootUntil || 0) > now;
     const moveSpeed = 4 * (playerInEnemyFire(room, pi) ? FIRE_BREATH_SLOW_MULT : 1);
     p.vx = 0;
     if (p.fireBreathing) {
@@ -628,11 +674,11 @@ function updateRoom(room) {
       if (left !== right) {
         p.facing = right ? 1 : -1;
       }
-    } else if (left && !right) {
+    } else if (!rooted && left && !right) {
       p.vx = -moveSpeed;
       p.facing = -1;
     }
-    if (!p.fireBreathing && right && !left) {
+    if (!p.fireBreathing && !rooted && right && !left) {
       p.vx = moveSpeed;
       p.facing = 1;
     }
@@ -720,6 +766,10 @@ function updateRoom(room) {
       shot.y + shot.h > target.y;
     if (hit) {
       target.health = Math.max(0, target.health - shot.damage);
+      if (shot.freezeRootMs) {
+        target.freezeRootUntil = Math.max(target.freezeRootUntil || 0, Date.now() + shot.freezeRootMs);
+        target.vx = 0;
+      }
       shot.dead = true;
     }
     if (shot.x < -100 || shot.x > 1200) shot.dead = true;
@@ -753,6 +803,8 @@ function updateRoom(room) {
     room.intermissionStartedAt = Date.now();
     p0.health = playerMaxHp(p0);
     p1.health = playerMaxHp(p1);
+      if (p0.groundPound) p0.groundPoundUsesLeft = 2;
+      if (p1.groundPound) p1.groundPoundUsesLeft = 2;
       p0.orbAmmo = ORB_AMMO_PER_ROUND;
       p1.orbAmmo = ORB_AMMO_PER_ROUND;
       p0.lastShotAt = Date.now();
@@ -774,6 +826,7 @@ function updateRoom(room) {
       p.fireBreathing = false;
       p.fireStartAt = 0;
       p.fireNextDamageAt = 0;
+      p.freezeRootUntil = 0;
     });
     if (s0 < WINS_TO_END_MATCH && s1 < WINS_TO_END_MATCH) {
       const pick = pickRandomBuffTripletServer(room.buffLastOfferedKey);
@@ -808,6 +861,9 @@ setInterval(() => {
         weapon: p.weapon || "sword",
         charging: p.charging,
         fireBreath: !!p.fireBreath,
+        groundPound: !!p.groundPound,
+        groundPoundUsesLeft: p.groundPoundUsesLeft != null ? p.groundPoundUsesLeft : 0,
+        freezeRootUntil: p.freezeRootUntil || 0,
         fireBreathing: !!p.fireBreathing,
         fireStartAt: p.fireStartAt || 0,
         orbAmmo: p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND,
@@ -1044,15 +1100,19 @@ io.on("connection", (socket) => {
           const shot = chargedShotFromHeldMs(cappedMs);
           const centerY = 544;
           const baseDamage = Math.round(shot.damage * (player.damageMult || 1));
-          const spawn = (vx, vy = 0) =>
+          const freezeTriangleUntil = player.freezeShot ? Date.now() + FREEZE_HIT_ROOT_MS : 0;
+          const freezeRootMs = player.freezeShot ? FREEZE_HIT_ROOT_MS : 0;
+          const spawn = (vx, vy = 0, xOffset = 0) =>
             room.projectiles.push({
-              x: player.x + 20,
+              x: player.x + 20 + xOffset,
               y: centerY - shot.h / 2,
               w: shot.w,
               h: shot.h,
               vx,
               vy,
               damage: baseDamage,
+              freezeTriangleUntil,
+              freezeRootMs,
               targetIdx: idx === 0 ? 1 : 0,
             });
           if (player.tripleShot) {
@@ -1061,6 +1121,10 @@ io.on("connection", (socket) => {
             spawn(player.facing * shot.speed * 0.92, 0.45);
           } else {
             spawn(player.facing * shot.speed, 0);
+          }
+          if (player.freezeShot) {
+            const dir = player.facing >= 0 ? 1 : -1;
+            spawn(player.facing * shot.speed, 0, -dir * FREEZE_TRAIL_ORB_OFFSET);
           }
           if (!player.infiniteAmmo) {
             player.orbAmmo = ammo - orbCost;
@@ -1081,6 +1145,22 @@ io.on("connection", (socket) => {
       if (payload.action === "fireEnd") {
         player.fireBreathing = false;
       }
+      if (payload.action === "groundPound" && player.groundPound) {
+        const usesLeft = Number.isFinite(player.groundPoundUsesLeft) ? player.groundPoundUsesLeft : 0;
+        if (usesLeft <= 0) return;
+        player.groundPoundUsesLeft = usesLeft - 1;
+        const atkLayer = groundedLayerY(player);
+        const defLayer = groundedLayerY(enemy);
+        if (atkLayer == null || defLayer == null || Math.abs(atkLayer - defLayer) > GROUND_POUND_LAYER_EPSILON) {
+          return;
+        }
+        const dmg = Math.max(1, Math.round(playerMaxHp(enemy) * GROUND_POUND_DAMAGE_FRACTION));
+        enemy.health = Math.max(0, enemy.health - dmg);
+        enemy.vy = Math.min(enemy.vy || 0, GROUND_POUND_LAUNCH_VY);
+        enemy.freezeRootUntil = Math.max(enemy.freezeRootUntil || 0, Date.now() + GROUND_POUND_FREEZE_MS);
+        enemy.onGround = false;
+        enemy.jumpsUsed = Math.max(enemy.jumpsUsed || 0, 1);
+      }
     });
 
     socket.on("buff:pick", ({ buffId }) => {
@@ -1093,7 +1173,7 @@ io.on("connection", (socket) => {
       room.buffPickActive = false;
       room.buffPickInputUnlocked = false;
       room.buffUnlockAt = 0;
-      if (buffId === "fireBreath") {
+      if (buffId === "fireBreath" || buffId === "groundPound") {
         room.intermissionStartedAt = 0;
         room.lockUntil = Date.now() + 10 * 60 * 1000;
       } else {
@@ -1107,6 +1187,14 @@ io.on("connection", (socket) => {
       if (!room) return;
       const idx = room.players.findIndex((p) => p.socketId === socket.id);
       if (!room.players[idx]?.fireBreath) return;
+      room.intermissionStartedAt = Date.now();
+      room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
+    });
+    socket.on("ground:bind:done", () => {
+      const room = [...rooms.values()].find((r) => r.players.some((p) => p.socketId === socket.id));
+      if (!room) return;
+      const idx = room.players.findIndex((p) => p.socketId === socket.id);
+      if (!room.players[idx]?.groundPound) return;
       room.intermissionStartedAt = Date.now();
       room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
     });
