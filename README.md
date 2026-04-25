@@ -41,16 +41,19 @@ Open `http://localhost:3000`.
 
 This app needs a persistent Node process for Socket.IO (not static-only hosting).
 
-### Render + Neon + custom domain
+### Render + Neon + `doubledoof.peoplesrobotics.com`
 
-Database is **Neon** (or any Postgres): put the connection string in `DB_URL` when Render asks during Blueprint deploy, or under the **doubledoof** web service → **Environment**.
+**Service (Neel’s workspace):** [doubledoof on Render](https://dashboard.render.com/web/srv-d7m1sfhj2pic73elishg) — default URL `https://doubledoof.onrender.com`.
 
-1. Install the CLI: `brew install render`, then `render login`.
-2. Push this repo to GitHub/GitLab/Bitbucket (Render deploys from Git).
-3. Dashboard: **New** → **Blueprint** → connect the repo → **Deploy Blueprint** ([`render.yaml`](./render.yaml)).
-4. Set **sync** env vars when prompted: `DB_URL` (Neon), `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SES_REGION`, `AWS_SES_FROM_EMAIL`.
-5. **DNS for `doubledoof.peoplesrobotics.com`**: wherever `peoplesrobotics.com` DNS is hosted, add a **CNAME** from `doubledoof` to the hostname Render shows for this service (often `doubledoof.onrender.com` — copy from **Settings** → **Custom domains** for the service). Use **DNS only** if you use Cloudflare (grey cloud), or Render’s SSL verification can fail.
+1. **Environment** (same service → **Environment** in the sidebar): add  
+   `DB_URL` = your Neon connection string (include `?sslmode=require` if Neon’s docs say so), plus  
+   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SES_REGION`, `AWS_SES_FROM_EMAIL` for email codes.  
+   Save, then **Manual Deploy** → **Deploy latest commit** if the app does not restart by itself.
+2. **Custom domain:** service → **Settings** → **Custom Domains** → **Add** → `doubledoof.peoplesrobotics.com`. Render shows the exact **CNAME** target (often `doubledoof.onrender.com`). At your **peoplesrobotics.com** DNS host, create that CNAME for host `doubledoof`. On Cloudflare, use **DNS only** (grey cloud) until TLS verifies.
+3. **GitHub:** repo is [github.com/nbanerje/doubledoof](https://github.com/nbanerje/doubledoof) (was set **public** so Render could clone before GitHub is linked to Render). In Render: **Account** → **Connected Accounts** → link **GitHub**, then you can make the repo private again in GitHub if you want.
 
-`render blueprints validate render.yaml` after `render workspace set` checks the blueprint against your workspace.
+[`render.yaml`](./render.yaml) matches this setup (Neon `DB_URL`, no Render Postgres, domain name for reference). You can instead use **New** → **Blueprint** from that file; this workspace already has a **Web Service** created via CLI with the same repo.
+
+`render blueprints validate render.yaml` after `render workspace set` validates the YAML.
 
 Free web tier **spins down** when idle (cold start on first request).
