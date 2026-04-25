@@ -375,6 +375,8 @@ const MELEE_KNOCKBACK_VX = 50;
 const FIRE_BREATH_RANGE = PLAYER_BODY_W * 1.5;
 const FIRE_BREATH_H = 20;
 const FIRE_BREATH_TICK_MS = 100;
+const FIRE_BREATH_FRAME_COUNT = 26;
+const FIRE_BREATH_FRAME_MS = 24;
 const FIRE_BREATH_BASE_DAMAGE = 3;
 const FIRE_BREATH_SLOW_MULT = 0.42;
 const FIRE_BREATH_GROWTH_PER_TICK = 0.01;
@@ -409,8 +411,8 @@ const GUY2_RUN_URLS = [
 ];
 const GUY2_HIT_URL = "./assets/guy2-hit.png";
 const MELEE_SWORD_URL = "./assets/melee-sword.png";
-const FIRE_BREATH_RIGHT_URL = "./assets/fire-breath-right.png";
-const FIRE_BREATH_LEFT_URL = "./assets/fire-breath-left.png";
+const FIRE_BREATH_RIGHT_URL = "./assets/fire-breath-right-sheet.png";
+const FIRE_BREATH_LEFT_URL = "./assets/fire-breath-left-sheet.png";
 const percivalIdleImage = new Image();
 const meleeSwordImage = new Image();
 const fireBreathRightImage = new Image();
@@ -2031,12 +2033,14 @@ function drawFireBreath(p) {
   ctx.imageSmoothingEnabled = false;
   ctx.globalCompositeOperation = "lighter";
   if (img.complete && img.naturalWidth) {
+    const frameW = Math.floor(img.naturalWidth / FIRE_BREATH_FRAME_COUNT);
+    const frame = Math.floor(held / FIRE_BREATH_FRAME_MS) % FIRE_BREATH_FRAME_COUNT;
     const h = Math.round(r.h * 2.4 * pulse);
     const w = Math.round(r.w * 1.22);
     const jitter = Math.sin(held * 0.026) * 2;
     const x = p.facing >= 0 ? r.x - 3 : r.x + r.w - w + 3;
     const y = r.y + r.h / 2 - h / 2 + jitter;
-    ctx.drawImage(img, Math.floor(x), Math.floor(y), w, h);
+    ctx.drawImage(img, frame * frameW, 0, frameW, img.naturalHeight, Math.floor(x), Math.floor(y), w, h);
   } else {
     ctx.fillStyle = "rgba(255, 86, 22, 0.78)";
     ctx.fillRect(Math.floor(r.x), Math.floor(r.y), Math.ceil(r.w), Math.ceil(r.h));
