@@ -1296,7 +1296,7 @@ function renderOnlineLobby() {
   extra += `<div class="lobby-section"><h3 class="lobby-h3">Join with host code</h3>`;
   extra += `<div class="profile-row"><input id="joinCodeInput" type="text" inputmode="numeric" maxlength="5" placeholder="5-digit host code" />`;
   extra += `<button type="button" class="lobby-accept" data-lobby-action="joinCode">Join</button></div>`;
-  extra += `<p class="lobby-empty">Host must click “Host (1 spot)” first.</p></div>`;
+  extra += `<p class="lobby-empty">Host must click “Host match (wait for join)” first.</p></div>`;
   if (pendingInvites.length) {
     extra += `<div class="lobby-section"><h3 class="lobby-h3">Invites</h3><ul class="lobby-invites">`;
     for (const inv of pendingInvites) {

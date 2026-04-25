@@ -760,8 +760,10 @@ button.lobby-decline {
   }
 }
 
-@media (max-width: 768px) {
+@media (pointer: coarse) {
   .app {
+    position: fixed;
+    inset: 0;
     width: 100dvw;
     height: 100dvh;
     min-height: 100dvh;
@@ -799,9 +801,7 @@ button.lobby-decline {
       max(8px, env(safe-area-inset-bottom))
       max(10px, env(safe-area-inset-left));
   }
-}
 
-@media (max-width: 768px) and (orientation: landscape) {
   .touch-joystick {
     width: min(92px, 24dvh);
     height: min(92px, 24dvh);
@@ -816,5 +816,34 @@ button.lobby-decline {
     min-width: min(92px, 22dvw);
     min-height: min(52px, 15dvh);
     padding: 6px 10px;
+  }
+}
+
+@media (pointer: coarse) and (orientation: portrait) {
+  .app {
+    width: 100dvh;
+    height: 100dvw;
+    min-height: 100dvw;
+    transform: rotate(90deg) translateY(-100%);
+    transform-origin: top left;
+  }
+
+  .game-wrap {
+    width: min(100dvh, calc(100dvw * 1.677419));
+    height: min(100dvw, calc(100dvh / 1.677419));
+  }
+
+  .touch-joystick {
+    width: min(92px, 24dvw);
+    height: min(92px, 24dvw);
+  }
+
+  .touch-stick {
+    width: min(42px, 11dvw);
+    height: min(42px, 11dvw);
+  }
+
+  .touch-btn {
+    min-height: min(52px, 15dvw);
   }
 }
