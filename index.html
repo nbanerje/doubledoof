@@ -47,31 +47,33 @@
           <h2>Settings</h2>
           <button id="settingsCloseBtn" type="button">Close</button>
         </div>
-        <p class="subtitle">Fast rounds, local/online battles, and profiles backed by Neon.</p>
-        <div class="profile">
-          <label>
-            Username
-            <input id="usernameInput" type="text" maxlength="24" />
-          </label>
-          <div class="profile-row">
-            <input id="emailInput" type="email" placeholder="Email (optional)" />
-            <button id="sendCodeBtn" type="button">Send Code</button>
+        <p class="subtitle">Online: you get a 5-digit code automatically — no account or email.</p>
+        <div id="optionalAccountPanel" class="optional-account-panel" hidden>
+          <p class="friends-hint">Optional (disabled for now): email profile and friends list.</p>
+          <div class="profile">
+            <label>
+              Username
+              <input id="usernameInput" type="text" maxlength="24" />
+            </label>
+            <div class="profile-row">
+              <input id="emailInput" type="email" placeholder="Email (optional)" />
+              <button id="sendCodeBtn" type="button">Send Code</button>
+            </div>
+            <div class="profile-row">
+              <input id="codeInput" type="text" placeholder="Enter code" />
+              <button id="verifyCodeBtn" type="button">Verify</button>
+            </div>
+            <small id="authStatus">Sign in with email code to sync profile.</small>
+            <button id="saveProfileBtn" type="button">Save Profile</button>
           </div>
-          <div class="profile-row">
-            <input id="codeInput" type="text" placeholder="Enter code" />
-            <button id="verifyCodeBtn" type="button">Verify</button>
+          <div class="friends">
+            <h2>Friends</h2>
+            <div class="profile-row">
+              <input id="friendInput" type="text" placeholder="Friend username" />
+              <button id="inviteBtn" type="button">Add friend</button>
+            </div>
+            <ul id="friendsList"></ul>
           </div>
-          <small id="authStatus">Sign in with email code to sync profile.</small>
-          <button id="saveProfileBtn" type="button">Save Profile</button>
-        </div>
-        <div class="friends">
-          <h2>Friends</h2>
-          <p class="friends-hint">Online play uses the in-game lobby (shareable names + challenge list). Friends here are optional.</p>
-          <div class="profile-row">
-            <input id="friendInput" type="text" placeholder="Friend username" />
-            <button id="inviteBtn" type="button">Add friend</button>
-          </div>
-          <ul id="friendsList"></ul>
         </div>
         <div class="controls">
           <button id="singleBtn" type="button">Single Player</button>

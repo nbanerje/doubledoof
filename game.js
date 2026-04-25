@@ -770,7 +770,7 @@ function commitRemap() {
   clearArcadeExtra();
   arcadeTextEl.textContent = "Launch this round now.";
   if (t === "online") {
-    setArcadeStep("ready");
+    setupSocket();
     return;
   }
   if (t === "p0") {
@@ -1160,7 +1160,7 @@ function renderOnlineLobby() {
   stepLabelEl.textContent = "Online";
   arcadeTitleEl.textContent = "Play online";
   arcadeTextEl.textContent =
-    "Share your match name (say it or text it). Challenge someone in the list — if they’re already hosting with an open red slot, you drop in immediately, even mid-round. Or host first and let them challenge you.";
+    "Choose Host to open one spot. Share your 5-digit code, and your friend can press Join and enter it.";
   arcadeActionsEl.innerHTML = "";
 
   const host = document.createElement("button");
@@ -1169,11 +1169,11 @@ function renderOnlineLobby() {
   host.textContent = "Host match (wait for join)";
   arcadeActionsEl.appendChild(host);
 
-  const refresh = document.createElement("button");
-  refresh.type = "button";
-  refresh.dataset.action = "lobby_refresh";
-  refresh.textContent = "Refresh list";
-  arcadeActionsEl.appendChild(refresh);
+  const join = document.createElement("button");
+  join.type = "button";
+  join.dataset.action = "lobby_join";
+  join.textContent = "Join by code";
+  arcadeActionsEl.appendChild(join);
 
   const cancel = document.createElement("button");
   cancel.type = "button";
@@ -1181,21 +1181,11 @@ function renderOnlineLobby() {
   cancel.textContent = "Disconnect";
   arcadeActionsEl.appendChild(cancel);
 
-  let extra = `<p class="lobby-share">Your match name: <strong>${escapeHtml(myShareName || "…")}</strong></p>`;
-  extra += `<div class="lobby-section"><h3 class="lobby-h3">Online now</h3>`;
-  const others = lobbyRoster.filter((r) => r.userId !== myLobbyUserId);
-  if (!others.length) {
-    extra += `<p class="lobby-empty">No one else in the lobby. Open a second browser (or ask a friend) and sign in.</p>`;
-  } else {
-    extra += `<ul class="lobby-list">`;
-    for (const row of others) {
-      extra += `<li class="lobby-row"><div class="lobby-row-text"><span class="lobby-name">${escapeHtml(row.shareName)}</span>`;
-      extra += `<span class="lobby-sub">${escapeHtml(row.username)}</span></div>`;
-      extra += `<button type="button" class="lobby-challenge" data-lobby-action="challenge" data-user-id="${escapeHtml(row.userId)}">Challenge</button></li>`;
-    }
-    extra += `</ul>`;
-  }
-  extra += `</div>`;
+  let extra = `<p class="lobby-share">Your host code: <strong>${escapeHtml(myShareName || "…")}</strong></p>`;
+  extra += `<div class="lobby-section"><h3 class="lobby-h3">Join with host code</h3>`;
+  extra += `<div class="profile-row"><input id="joinCodeInput" type="text" inputmode="numeric" maxlength="5" placeholder="5-digit host code" />`;
+  extra += `<button type="button" class="lobby-accept" data-lobby-action="joinCode">Join</button></div>`;
+  extra += `<p class="lobby-empty">Host must click “Host (1 spot)” first.</p></div>`;
   if (pendingInvites.length) {
     extra += `<div class="lobby-section"><h3 class="lobby-h3">Invites</h3><ul class="lobby-invites">`;
     for (const inv of pendingInvites) {
@@ -1244,32 +1234,23 @@ function setArcadeStep(step) {
 
   const steps = {
     welcome: {
-      index: "Step 1 of 4",
+      index: "Step 1 of 3",
       title: "Welcome to Bat Duel",
       text: "Start a new arcade session and map your keys before the round.",
       actions: [{ id: "next", label: "Start Setup" }],
     },
     mode: {
-      index: "Step 2 of 4",
+      index: "Step 2 of 3",
       title: "Choose Game Mode",
-      text: "Single and local start instantly. Online requires login.",
+      text: "Single and local start instantly. Online gives you a 5-digit code — no account.",
       actions: [
         { id: "single", label: "Single Player" },
         { id: "multi", label: "Local Multiplayer" },
         { id: "online", label: "Online (lobby)" },
       ],
     },
-    auth: {
-      index: "Step 3 of 4",
-      title: "Sign In for Online",
-      text: "Open Settings, use Send Code and Verify, then continue.",
-      actions: [
-        { id: "checkAuth", label: "I Verified My Email" },
-        { id: "backMode", label: "Back to Mode Select" },
-      ],
-    },
     ready: {
-      index: "Step 4 of 4",
+      index: "Step 3 of 3",
       title: "Ready",
       text: "Launch this round now.",
       actions: [{ id: "launch", label: "Play Round" }],
@@ -2387,19 +2368,14 @@ async function loadProfileFromServer() {
 }
 
 function setupSocket() {
-  if (!profile.token) {
-    openSettings();
-    setArcadeStep("auth");
-    return;
-  }
   if (socket) socket.disconnect();
   pendingInvites = [];
   lobbyRoster = [];
-  myShareName = "";
+  myShareName = "…";
   myLobbyUserId = "";
-  socket = io({
-    auth: { token: profile.token },
-  });
+  arcadeStep = "online_lobby";
+  renderOnlineLobby();
+  socket = io();
 
   socket.on("connect", () => {
     setMatchStatus("Online — pick someone to challenge or host a match.");
@@ -2437,6 +2413,10 @@ function setupSocket() {
     }
   });
 
+  socket.on("connect_error", (err) => {
+    showBanner(err.message || "Could not connect to game server");
+  });
+
   socket.on("game:error", (p) => {
     showBanner(p.message || "Something went wrong");
   });
@@ -2470,7 +2450,7 @@ function setupSocket() {
     roomId = null;
     mode = "single";
     pendingInvites = [];
-    setArcadeStep("mode");
+    setupSocket();
   });
 }
 
@@ -2683,7 +2663,8 @@ function setupUI() {
   });
   document.getElementById("onlineBtn").addEventListener("click", () => {
     mode = "online";
-    setArcadeStep(profile.token ? "controls_online" : "auth");
+    closeSettings();
+    setupSocket();
   });
   document.getElementById("restartBtn").addEventListener("click", () => {
     localReset();
@@ -2716,7 +2697,7 @@ function setupUI() {
       await loadProfileFromServer();
       renderFriends();
       if (mode === "online") {
-        setArcadeStep("controls_online");
+        setupSocket();
       }
       closeSettings();
     } catch (err) {
@@ -2772,13 +2753,7 @@ function setupUI() {
     }
     if (action === "online") {
       mode = "online";
-      setArcadeStep(profile.token ? "controls_online" : "auth");
-      openSettings();
-    }
-    if (action === "checkAuth") {
-      setArcadeStep(profile.token ? (mode === "online" ? "controls_online" : "ready") : "auth");
-      if (!profile.token) showBanner("Verify email first");
-      if (!profile.token) openSettings();
+      setupSocket();
     }
     if (action === "bind0_keep") {
       resetPlayerBindingsDefault(0);
@@ -2800,7 +2775,7 @@ function setupUI() {
     }
     if (action === "online_bind_keep") {
       resetOnlineBindingsDefault();
-      setArcadeStep("ready");
+      setupSocket();
     }
     if (action === "online_bind_map") {
       startRemapWizardOnline();
@@ -2829,8 +2804,11 @@ function setupUI() {
     if (action === "lobby_host") {
       if (socket) socket.emit("room:create");
     }
-    if (action === "lobby_refresh") {
-      if (socket) socket.emit("lobby:list");
+    if (action === "lobby_join") {
+      const input = document.getElementById("joinCodeInput");
+      if (input instanceof HTMLInputElement && socket) {
+        socket.emit("join:code", { code: input.value.trim() });
+      }
     }
   });
 
@@ -2839,11 +2817,10 @@ function setupUI() {
     const btn = from && typeof from.closest === "function" ? from.closest("[data-lobby-action]") : null;
     if (!btn || !socket) return;
     const act = btn.getAttribute("data-lobby-action");
-    if (act === "challenge") {
-      const uid = btn.getAttribute("data-user-id");
-      if (uid) {
-        socket.emit("invite:send", { targetUserId: uid });
-        showBanner("Challenge sent");
+    if (act === "joinCode") {
+      const input = document.getElementById("joinCodeInput");
+      if (input instanceof HTMLInputElement) {
+        socket.emit("join:code", { code: input.value.trim() });
       }
     }
     if (act === "accept") {

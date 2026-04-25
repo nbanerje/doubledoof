@@ -61,47 +61,20 @@ const rooms = new Map();
 /** @type {Map<string, { socketId: string, shareName: string, username: string }>} */
 const onlineLobby = new Map();
 
-const LOBBY_ADJ = [
-  "Swift",
-  "Bright",
-  "Quick",
-  "Cosmic",
-  "Lucky",
-  "Neon",
-  "Super",
-  "Turbo",
-  "Mega",
-  "Hyper",
-];
-const LOBBY_NOUN = [
-  "Fox",
-  "Panda",
-  "Tiger",
-  "Owl",
-  "Bolt",
-  "Spark",
-  "Ace",
-  "Star",
-  "Wave",
-  "Comet",
-];
-
-function allocShareName() {
-  for (let n = 0; n < 80; n += 1) {
-    const a = LOBBY_ADJ[Math.floor(Math.random() * LOBBY_ADJ.length)];
-    const b = LOBBY_NOUN[Math.floor(Math.random() * LOBBY_NOUN.length)];
-    const num = Math.floor(Math.random() * 90 + 10);
-    const s = `${a}${b}${num}`;
+/** Unique 5-digit lobby code (10000–99999) per connected player. */
+function allocPlayerCode() {
+  for (let n = 0; n < 200; n += 1) {
+    const code = String(Math.floor(10000 + Math.random() * 90000));
     let clash = false;
     for (const v of onlineLobby.values()) {
-      if (v.shareName === s) {
+      if (v.shareName === code) {
         clash = true;
         break;
       }
     }
-    if (!clash) return s;
+    if (!clash) return code;
   }
-  return `Guest${Math.floor(Math.random() * 900000 + 100000)}`;
+  return `${Date.now()}`.slice(-5);
 }
 
 function broadcastLobby() {
@@ -506,41 +479,27 @@ setInterval(() => {
 }, 1000 / 30);
 
 io.use((socket, next) => {
-  const token = socket.handshake.auth?.token;
-  const userId = sessions.get(token);
-  if (!userId) {
-    next(new Error("Unauthorized"));
-    return;
-  }
-  socket.userId = userId;
+  socket.userId = uuidv4();
   next();
 });
 
 io.on("connection", (socket) => {
-  void (async () => {
-    let userRow;
-    try {
-      userRow = await pool.query("SELECT username FROM users WHERE id = $1", [socket.userId]);
-    } catch {
-      socket.disconnect(true);
-      return;
-    }
-    const username = userRow.rows[0]?.username || "Player";
-    const shareName = allocShareName();
-    onlineLobby.set(socket.userId, { socketId: socket.id, shareName, username });
-    socketByUser.set(socket.userId, socket.id);
-    socket.emit("lobby:self", { shareName, userId: socket.userId });
+  const shareName = allocPlayerCode();
+  const username = "";
+  onlineLobby.set(socket.userId, { socketId: socket.id, shareName, username });
+  socketByUser.set(socket.userId, socket.id);
+  socket.emit("lobby:self", { shareName, userId: socket.userId });
 
-    for (const [rid, room] of rooms.entries()) {
-      const idx = room.players.findIndex((p) => p.id === socket.userId);
-      if (idx < 0) continue;
-      room.players[idx].socketId = socket.id;
-      socket.emit("match:start", { roomId: rid, playerIndex: idx });
-    }
+  for (const [rid, room] of rooms.entries()) {
+    const idx = room.players.findIndex((p) => p.id === socket.userId);
+    if (idx < 0) continue;
+    room.players[idx].socketId = socket.id;
+    socket.emit("match:start", { roomId: rid, playerIndex: idx });
+  }
 
-    broadcastLobby();
+  broadcastLobby();
 
-    socket.on("lobby:list", () => {
+  socket.on("lobby:list", () => {
       socket.emit(
         "lobby:players",
         [...onlineLobby.entries()].map(([userId, v]) => ({
@@ -558,6 +517,41 @@ io.on("connection", (socket) => {
         return;
       }
       createHostRoom(socket.userId, socket.id);
+      broadcastLobby();
+    });
+
+    socket.on("join:code", ({ code }) => {
+      const targetCode = String(code || "").trim();
+      if (!/^\d{5}$/.test(targetCode)) {
+        socket.emit("game:error", { message: "Enter a valid 5-digit host code" });
+        return;
+      }
+      let hostUserId = null;
+      for (const [uid, v] of onlineLobby.entries()) {
+        if (v.shareName === targetCode) {
+          hostUserId = uid;
+          break;
+        }
+      }
+      if (!hostUserId) {
+        socket.emit("game:error", { message: "No host found with that code" });
+        return;
+      }
+      if (hostUserId === socket.userId) {
+        socket.emit("game:error", { message: "That is your own host code" });
+        return;
+      }
+      const roomId = findHostRoomId(hostUserId);
+      if (!roomId) {
+        socket.emit("game:error", { message: "That host has not started hosting yet" });
+        return;
+      }
+      detachUserFromRooms(socket.userId, roomId);
+      const joined = attachGuestToRoom(roomId, socket.userId, socket.id);
+      if (!joined.ok) {
+        socket.emit("game:error", { message: joined.reason });
+        return;
+      }
       broadcastLobby();
     });
 
@@ -688,7 +682,6 @@ io.on("connection", (socket) => {
         }
       }
     });
-  })();
 });
 
 initDb()
