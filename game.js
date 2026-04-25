@@ -2165,6 +2165,12 @@ function hideBuffPickOverlay() {
 function applyBuffChoice(buffId) {
   if (!localState.buffPickActive || !localState.buffPickInputUnlocked) return;
   if (!BUFF_DEFS[buffId]) return;
+  if (mode === "online") {
+    if (socket && roomId) socket.emit("buff:pick", { buffId });
+    localState.buffPickActive = false;
+    hideBuffPickOverlay();
+    return;
+  }
   const loser = localState.buffPickLoser;
   const win = loser === 0 ? 1 : 0;
   const L = localState.players[loser];
@@ -2200,10 +2206,13 @@ function applyBuffChoice(buffId) {
   visualState[1].charging = false;
 }
 
-function showBuffPickOverlay(loserIdx) {
+function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
   const wrap = document.getElementById("buffPickOverlay");
   if (!wrap) return;
-  const { triplet, key } = pickRandomBuffTriplet();
+  const picked = forcedTriplet
+    ? { triplet: forcedTriplet, key: [...forcedTriplet].sort().join("|") }
+    : pickRandomBuffTriplet();
+  const { triplet, key } = picked;
   localState.buffPickOptions = triplet;
   localState.buffLastOfferedKey = key;
   const btnWrap = document.getElementById("buffPickButtons");
@@ -2548,18 +2557,29 @@ function setupSocket() {
 
   socket.on("match:state", (state) => {
     localState = {
+      ...localState,
       round: state.round,
       players: state.players || [],
       projectiles: state.projectiles || [],
       lockUntil: state.lockUntil ?? 0,
       intermissionStartedAt: state.intermissionStartedAt ?? 0,
-      buffPickActive: false,
-      buffPickLoser: 0,
-      buffPickInputUnlocked: false,
+      buffPickActive: !!state.buffPickActive,
+      buffPickLoser: state.buffPickLoser ?? 0,
+      buffPickInputUnlocked: !!state.buffPickInputUnlocked,
+      buffPickOptions: Array.isArray(state.buffPickOptions) ? state.buffPickOptions : null,
     };
     for (let i = 0; i < 2; i += 1) {
       if (!visualState[i]) continue;
       visualState[i].charging = !!localState.players[i]?.charging;
+    }
+    if (localState.buffPickActive && Array.isArray(localState.buffPickOptions)) {
+      if (!document.getElementById("buffPickOverlay")?.classList.contains("hidden")) return;
+      showBuffPickOverlay(localState.buffPickLoser, localState.buffPickOptions);
+      localState.buffPickInputUnlocked = !!state.buffPickInputUnlocked;
+      const gate = document.getElementById("buffPickGateBlock");
+      if (gate) gate.classList.toggle("hidden", localState.buffPickInputUnlocked);
+    } else if (!localState.buffPickActive) {
+      hideBuffPickOverlay();
     }
   });
 

@@ -21,6 +21,7 @@ const CHARGE_THRESHOLD_MS = 0;
 /** Quick tap under this = melee (single attack key online); longer = charge shot */
 const MELEE_QUICK_TAP_MS = 150;
 const ROUND_INTERMISSION_MS = 4000;
+const BUFF_PICK_GATE_MS = 2000;
 const MAX_CHARGE_MS = 12000;
 const CHARGE_SCALE_MS = 3200;
 const MELEE_RANGE = 48;
@@ -34,6 +35,9 @@ const PLAYER_BODY_H = 48;
 const PLAYER_TOP_Y = FLOOR_Y - PLAYER_BODY_H;
 const GRAVITY = 0.7;
 const JUMP_VELOCITY = -12.5;
+const POWER_BUFF_DAMAGE_MULT = 1.35;
+const TANK_BUFF_MAX_HP = 130;
+const BUFF_POOL = ["triple", "tank", "power", "infiniteJumps", "infiniteAmmo", "instantMaxCharge", "meleeLong"];
 
 function chargedShotFromHeldMs(heldMs) {
   const effective = Math.max(0, Math.min(heldMs - CHARGE_THRESHOLD_MS, CHARGE_SCALE_MS));
@@ -44,6 +48,36 @@ function chargedShotFromHeldMs(heldMs) {
   const h = 4 + Math.round(11 * curved);
   const speed = 9 + 4 * curved;
   return { damage, w, h, speed };
+}
+
+function playerMaxHp(p) {
+  return p.maxHealth != null && p.maxHealth > 0 ? p.maxHealth : 100;
+}
+
+function pickRandomBuffTripletServer(lastKey) {
+  for (let i = 0; i < 40; i += 1) {
+    const arr = [...BUFF_POOL];
+    for (let j = arr.length - 1; j > 0; j -= 1) {
+      const k = Math.floor(Math.random() * (j + 1));
+      [arr[j], arr[k]] = [arr[k], arr[j]];
+    }
+    const triplet = arr.slice(0, 3);
+    const key = [...triplet].sort().join("|");
+    if (!lastKey || key !== lastKey) return { triplet, key };
+  }
+  const triplet = BUFF_POOL.slice(0, 3);
+  return { triplet, key: [...triplet].sort().join("|") };
+}
+
+function applyBuffToPlayerOnline(player, buffId) {
+  if (buffId === "triple") player.tripleShot = true;
+  else if (buffId === "tank") player.maxHealth = TANK_BUFF_MAX_HP;
+  else if (buffId === "power") player.damageMult = POWER_BUFF_DAMAGE_MULT;
+  else if (buffId === "infiniteJumps") player.infiniteJumps = true;
+  else if (buffId === "infiniteAmmo") player.infiniteAmmo = true;
+  else if (buffId === "instantMaxCharge") player.instantMaxCharge = true;
+  else if (buffId === "meleeLong") player.meleeRangeScale = 2;
+  player.health = playerMaxHp(player);
 }
 const DB_URL = process.env.DB_URL || process.env.DATABASE_URL;
 if (!DB_URL) {
@@ -165,6 +199,12 @@ function createHostRoom(hostUserId, hostSocketId) {
     projectiles: [],
     lockUntil: 0,
     intermissionStartedAt: 0,
+    buffPickActive: false,
+    buffPickLoser: 0,
+    buffPickOptions: null,
+    buffPickInputUnlocked: false,
+    buffUnlockAt: 0,
+    buffLastOfferedKey: null,
   });
   io.to(hostSocketId).emit("match:start", { roomId, playerIndex: 0 });
   return roomId;
@@ -412,6 +452,12 @@ app.get("/api/health", (_, res) => {
 
 function updateRoom(room) {
   const now = Date.now();
+  if (room.buffPickActive) {
+    if (!room.buffPickInputUnlocked && now >= room.buffUnlockAt) {
+      room.buffPickInputUnlocked = true;
+    }
+    return;
+  }
   if (room.lockUntil > now) return;
 
   for (const p of room.players) {
@@ -427,7 +473,7 @@ function updateRoom(room) {
       p.vx = 4;
       p.facing = 1;
     }
-    if (jump && !p.jumpHeld && p.onGround) {
+    if (jump && !p.jumpHeld && (p.onGround || p.infiniteJumps)) {
       p.vy = JUMP_VELOCITY;
       p.onGround = false;
     }
@@ -447,6 +493,7 @@ function updateRoom(room) {
 
   room.projectiles.forEach((shot) => {
     shot.x += shot.vx;
+    shot.y += shot.vy || 0;
     const target = room.players[shot.targetIdx];
     const hit =
       shot.x < target.x + PLAYER_BODY_W &&
@@ -474,9 +521,8 @@ function updateRoom(room) {
       room.round += 1;
     }
     room.intermissionStartedAt = Date.now();
-    room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
-    p0.health = 100;
-    p1.health = 100;
+    p0.health = playerMaxHp(p0);
+    p1.health = playerMaxHp(p1);
     p0.x = 220;
     p1.x = 760;
     p0.y = PLAYER_TOP_Y;
@@ -490,6 +536,19 @@ function updateRoom(room) {
       p.charging = false;
       p.chargeStart = 0;
     });
+    if (s0 < WINS_TO_END_MATCH && s1 < WINS_TO_END_MATCH) {
+      const loserIdx = winnerIdx === 0 ? 1 : 0;
+      const pick = pickRandomBuffTripletServer(room.buffLastOfferedKey);
+      room.buffPickActive = true;
+      room.buffPickLoser = loserIdx;
+      room.buffPickOptions = pick.triplet;
+      room.buffLastOfferedKey = pick.key;
+      room.buffPickInputUnlocked = false;
+      room.buffUnlockAt = Date.now() + BUFF_PICK_GATE_MS;
+      room.lockUntil = Date.now() + 10 * 60 * 1000;
+    } else {
+      room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
+    }
   }
 }
 
@@ -511,6 +570,10 @@ setInterval(() => {
       projectiles: room.projectiles,
       lockUntil: room.lockUntil,
       intermissionStartedAt: room.intermissionStartedAt,
+      buffPickActive: room.buffPickActive,
+      buffPickLoser: room.buffPickLoser,
+      buffPickInputUnlocked: room.buffPickInputUnlocked,
+      buffPickOptions: room.buffPickOptions,
     });
   }
 }, 1000 / 30);
@@ -688,27 +751,54 @@ io.on("connection", (socket) => {
       if (payload.action === "chargeRelease" && player.charging) {
         const heldMs = Date.now() - player.chargeStart;
         if (heldMs < MELEE_QUICK_TAP_MS) {
-          const inRange = Math.abs(player.x - enemy.x) <= MELEE_RANGE;
+          const meleeRange = MELEE_RANGE * (player.meleeRangeScale != null ? player.meleeRangeScale : 1);
+          const inRange = Math.abs(player.x - enemy.x) <= meleeRange;
           const facingToward = (enemy.x - player.x) * player.facing > 0;
           if (inRange && facingToward) {
-            enemy.health = Math.max(0, enemy.health - 10);
+            enemy.health = Math.max(0, enemy.health - Math.round(10 * (player.damageMult || 1)));
           }
         } else {
-          const cappedMs = Math.min(heldMs, MAX_CHARGE_MS);
+          const cappedMs = player.instantMaxCharge
+            ? CHARGE_SCALE_MS
+            : Math.min(heldMs, MAX_CHARGE_MS);
           const shot = chargedShotFromHeldMs(cappedMs);
           const centerY = 544;
-          room.projectiles.push({
-            x: player.x + 20,
-            y: centerY - shot.h / 2,
-            w: shot.w,
-            h: shot.h,
-            vx: player.facing * shot.speed,
-            damage: shot.damage,
-            targetIdx: idx === 0 ? 1 : 0,
-          });
+          const baseDamage = Math.round(shot.damage * (player.damageMult || 1));
+          const spawn = (vx, vy = 0) =>
+            room.projectiles.push({
+              x: player.x + 20,
+              y: centerY - shot.h / 2,
+              w: shot.w,
+              h: shot.h,
+              vx,
+              vy,
+              damage: baseDamage,
+              targetIdx: idx === 0 ? 1 : 0,
+            });
+          if (player.tripleShot) {
+            spawn(player.facing * shot.speed, 0);
+            spawn(player.facing * shot.speed * 0.92, -0.45);
+            spawn(player.facing * shot.speed * 0.92, 0.45);
+          } else {
+            spawn(player.facing * shot.speed, 0);
+          }
         }
         player.charging = false;
       }
+    });
+
+    socket.on("buff:pick", ({ buffId }) => {
+      const room = [...rooms.values()].find((r) => r.players.some((p) => p.socketId === socket.id));
+      if (!room || !room.buffPickActive || !room.buffPickInputUnlocked) return;
+      const loser = room.buffPickLoser;
+      if (room.players[loser].socketId !== socket.id) return;
+      if (!Array.isArray(room.buffPickOptions) || !room.buffPickOptions.includes(buffId)) return;
+      applyBuffToPlayerOnline(room.players[loser], buffId);
+      room.buffPickActive = false;
+      room.buffPickInputUnlocked = false;
+      room.buffUnlockAt = 0;
+      room.intermissionStartedAt = Date.now();
+      room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
     });
 
     socket.on("match:join", ({ roomId }) => {
