@@ -401,13 +401,6 @@ const PERCIVAL_RUN_URLS = [
   "./assets/percival-run-3.png",
   "./assets/percival-run-4.png",
 ];
-const JUMP_FLIP_URLS = [
-  "./assets/jump-flip-1.png",
-  "./assets/jump-flip-2.png",
-  "./assets/jump-flip-3.png",
-  "./assets/jump-flip-4.png",
-];
-const JUMP_FLIP_FRAME_MS = 85;
 const PERCIVAL_HIT_URL = "./assets/percival-hit.png";
 const GUY2_IDLE_URL = "./assets/guy2-idle.png";
 const GUY2_RUN_URLS = [
@@ -429,7 +422,6 @@ const guy2IdleImage = new Image();
 const guy2HitImage = new Image();
 const percivalRunImages = PERCIVAL_RUN_URLS.map(() => new Image());
 const guy2RunImages = GUY2_RUN_URLS.map(() => new Image());
-const jumpFlipImages = JUMP_FLIP_URLS.map(() => new Image());
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let percivalIdleBlit = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
@@ -447,11 +439,6 @@ let percivalRun = null;
  * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
  */
 let guy2Run = null;
-/**
- * Shared flip frames: 1 -> 2 -> 3 -> 4, then hold frame 4 until landing.
- * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
- */
-let jumpFlip = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let meleeSwordBlit = null;
 
@@ -494,8 +481,6 @@ function keyPercivalToCanvas(img) {
   const c10 = (iw - 1) * 4;
   const c01 = (ih - 1) * iw * 4;
   const c11 = ((ih - 1) * iw + (iw - 1)) * 4;
-  const ba = (d[c00 + 3] + d[c10 + 3] + d[c01 + 3] + d[c11 + 3]) / 4;
-  if (ba < 8) return { canvas: c, d, iw, ih };
   const br = (d[c00] + d[c10] + d[c01] + d[c11]) / 4;
   const bg = (d[c00 + 1] + d[c10 + 1] + d[c01 + 1] + d[c11 + 1]) / 4;
   const bb = (d[c00 + 2] + d[c10 + 2] + d[c01 + 2] + d[c11 + 2]) / 4;
@@ -611,25 +596,6 @@ for (let i = 0; i < percivalRunImages.length; i += 1) {
   percivalRunImages[i].onload = tryInitPercivalRun;
   percivalRunImages[i].src = PERCIVAL_RUN_URLS[i];
   if (percivalRunImages[i].complete) tryInitPercivalRun();
-}
-
-function tryInitJumpFlip() {
-  for (let i = 0; i < jumpFlipImages.length; i += 1) {
-    const im = jumpFlipImages[i];
-    if (!im.complete || !im.naturalWidth) return;
-  }
-  const frames = [];
-  for (let i = 0; i < jumpFlipImages.length; i += 1) {
-    const b = buildPercivalIdleBlit(jumpFlipImages[i]);
-    if (!b) return;
-    frames.push(b);
-  }
-  jumpFlip = { frames };
-}
-for (let i = 0; i < jumpFlipImages.length; i += 1) {
-  jumpFlipImages[i].onload = tryInitJumpFlip;
-  jumpFlipImages[i].src = JUMP_FLIP_URLS[i];
-  if (jumpFlipImages[i].complete) tryInitJumpFlip();
 }
 
 function defaultKeyBindings() {
@@ -1010,6 +976,78 @@ function renderOnlineControlChoice() {
   overlayEl.classList.remove("hidden");
 }
 
+function activeLoadoutForPlayer(playerIdx) {
+  return mode === "online" ? selectedOnlineLoadout : selectedLoadouts[playerIdx];
+}
+
+function playerLabelForSetup(playerIdx) {
+  if (mode === "online") return "Your fighter";
+  return playerIdx === 0 ? "Player 1 (Blue)" : "Player 2 (Red)";
+}
+
+function renderLoadoutSelectScreen(kind, playerIdx) {
+  const isCharacter = kind === "character";
+  const options = isCharacter ? CHARACTER_OPTIONS : WEAPON_OPTIONS;
+  const action = isCharacter ? "select_character" : "select_weapon";
+  const selectedKey = isCharacter ? "character" : "weapon";
+  const loadout = activeLoadoutForPlayer(playerIdx);
+  const label = playerLabelForSetup(playerIdx);
+
+  stepLabelEl.textContent = isCharacter ? "Pick character" : "Pick weapon";
+  arcadeTitleEl.textContent = isCharacter ? "Pick Character" : "Pick Weapon";
+  arcadeTextEl.textContent = isCharacter
+    ? `${label}: choose from 6 character slots. Only Knight is available right now.`
+    : `${label}: choose from 6 weapon slots. Only Sword is available right now.`;
+  arcadeActionsEl.innerHTML = "";
+  arcadeActionsEl.classList.add("arcade-actions--char-pick");
+  arcadeCardEl?.classList.add("arcade-card--wide");
+
+  const grid = document.createElement("div");
+  grid.className = "char-pick-grid";
+  options.forEach((opt, i) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "char-tile";
+    btn.dataset.action = action;
+    btn.dataset.optionId = opt.id;
+    btn.dataset.playerIdx = String(playerIdx);
+    if (!opt.enabled) btn.disabled = true;
+    if (loadout[selectedKey] === opt.id) btn.classList.add("selected");
+    const preview = document.createElement("span");
+    preview.className = `char-tile-preview char-tile-preview--${isCharacter ? "character" : "weapon"}`;
+    preview.textContent = opt.enabled ? (isCharacter ? "K" : "S") : String(i + 1);
+    const text = document.createElement("span");
+    text.className = "char-tile-label";
+    text.textContent = opt.label;
+    btn.append(preview, text);
+    grid.appendChild(btn);
+  });
+  arcadeActionsEl.appendChild(grid);
+
+  const back = document.createElement("button");
+  back.type = "button";
+  back.dataset.action = "loadout_back";
+  back.dataset.kind = kind;
+  back.dataset.playerIdx = String(playerIdx);
+  back.textContent = "Back";
+  arcadeActionsEl.appendChild(back);
+
+  if (arcadeExtraEl) {
+    arcadeExtraEl.innerHTML = `<p class="arcade-bind-summary">${label}: ${escapeHtml(loadout.character)} + ${escapeHtml(loadout.weapon)}</p>`;
+  }
+  overlayEl.classList.remove("hidden");
+}
+
+function nextStepAfterCharacter(playerIdx) {
+  return `weapon_p${playerIdx + 1}`;
+}
+
+function nextStepAfterWeapon(playerIdx) {
+  if (mode === "multi" && playerIdx === 0) return "character_p2";
+  if (mode === "online") return "controls_online";
+  return "controls_p1";
+}
+
 /** Distinct level layouts; `getLevelForRound` cycles (first-to-5 match length is independent). */
 const LEVELS = [
   {
@@ -1143,16 +1181,6 @@ function currentPlatforms() {
   return currentLevel().platforms;
 }
 
-function groundYForPlayer(p, level) {
-  let groundY = FLOOR_Y;
-  const platforms = Array.isArray(level?.platforms) ? level.platforms : [];
-  for (const plat of platforms) {
-    const overlapsX = p.x + PLAYER_BODY_W > plat.x && p.x < plat.x + plat.w;
-    if (overlapsX && plat.y < groundY) groundY = plat.y;
-  }
-  return groundY;
-}
-
 let mode = "single";
 /** Konami-style: last digit keys typed (digits only); `2017` → red (P2) gets 1000 max HP in local play. */
 let cheatRedDigitBuffer = "";
@@ -1168,6 +1196,27 @@ let playerIndex = 0;
 let arcadeStep = "welcome";
 let myShareName = "";
 let myLobbyUserId = "";
+const CHARACTER_OPTIONS = [
+  { id: "knight", label: "Knight", enabled: true },
+  { id: "locked-1", label: "Coming soon", enabled: false },
+  { id: "locked-2", label: "Coming soon", enabled: false },
+  { id: "locked-3", label: "Coming soon", enabled: false },
+  { id: "locked-4", label: "Coming soon", enabled: false },
+  { id: "locked-5", label: "Coming soon", enabled: false },
+];
+const WEAPON_OPTIONS = [
+  { id: "sword", label: "Sword", enabled: true },
+  { id: "locked-1", label: "Coming soon", enabled: false },
+  { id: "locked-2", label: "Coming soon", enabled: false },
+  { id: "locked-3", label: "Coming soon", enabled: false },
+  { id: "locked-4", label: "Coming soon", enabled: false },
+  { id: "locked-5", label: "Coming soon", enabled: false },
+];
+const selectedLoadouts = [
+  { character: "knight", weapon: "sword" },
+  { character: "knight", weapon: "sword" },
+];
+const selectedOnlineLoadout = { character: "knight", weapon: "sword" };
 /** @type {{ userId: string, shareName: string, username: string }[]} */
 let lobbyRoster = [];
 /** @type {{ roomId: string, fromShareName: string, fromUserId: string }[]} */
@@ -1187,8 +1236,6 @@ const visualState = [
     shootFlashUntil: 0,
     /** @type {number | undefined} last `p.x` for run animation (blue) */
     prevDrawX: undefined,
-    airStartAt: 0,
-    wasOnGround: true,
   },
   {
     recoilUntil: 0,
@@ -1202,8 +1249,6 @@ const visualState = [
     shootFlashUntil: 0,
     /** @type {number | undefined} last `p.x` for run animation (red) */
     prevDrawX: undefined,
-    airStartAt: 0,
-    wasOnGround: true,
   },
 ];
 let roundLockUntil = 0;
@@ -1285,6 +1330,7 @@ const profile = {
 };
 
 const overlayEl = document.getElementById("arcadeOverlay");
+const arcadeCardEl = document.getElementById("arcadeCard");
 const stepLabelEl = document.getElementById("arcadeStepLabel");
 const arcadeTitleEl = document.getElementById("arcadeTitle");
 const arcadeTextEl = document.getElementById("arcadeText");
@@ -1361,6 +1407,8 @@ function refreshOnlineLobbyIfOpen() {
 }
 
 function renderOnlineLobby() {
+  arcadeActionsEl.classList.remove("arcade-actions--char-pick");
+  arcadeCardEl?.classList.remove("arcade-card--wide");
   stepLabelEl.textContent = "Online";
   arcadeTitleEl.textContent = "Play online";
   arcadeTextEl.textContent =
@@ -1412,7 +1460,24 @@ function setArcadeStep(step) {
   teardownRemapWizard();
   clearArcadeExtra();
   arcadeActionsEl.classList.remove("arcade-actions--char-pick");
+  arcadeCardEl?.classList.remove("arcade-card--wide");
 
+  if (step === "character_p1") {
+    renderLoadoutSelectScreen("character", 0);
+    return;
+  }
+  if (step === "weapon_p1") {
+    renderLoadoutSelectScreen("weapon", 0);
+    return;
+  }
+  if (step === "character_p2") {
+    renderLoadoutSelectScreen("character", 1);
+    return;
+  }
+  if (step === "weapon_p2") {
+    renderLoadoutSelectScreen("weapon", 1);
+    return;
+  }
   if (step === "controls_p1") {
     renderControlChoiceScreen(0);
     return;
@@ -1440,11 +1505,11 @@ function setArcadeStep(step) {
     mode: {
       index: "Step 2 of 3",
       title: "Choose Game Mode",
-      text: "Single and local start instantly. Online gives you a 5-digit code — no account.",
+      text: "First choose how you want to play. Character and weapon picks come next.",
       actions: [
-        { id: "single", label: "Single Player" },
-        { id: "multi", label: "Local Multiplayer" },
-        { id: "online", label: "Online (lobby)" },
+        { id: "single", label: "1 Player" },
+        { id: "multi", label: "Local" },
+        { id: "online", label: "Online" },
       ],
     },
   };
@@ -1583,14 +1648,6 @@ function drawPlayer(p) {
   const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
   const px = Math.floor(p.x);
   const py = Math.floor(baseY);
-  const platformGroundY = groundYForPlayer(p, currentLevel());
-  const airborne =
-    p.onGround === false ||
-    (p.onGround !== true && baseY < platformGroundY - PLAYER_BODY_H - 0.5);
-  if (airborne && v.wasOnGround) v.airStartAt = now;
-  if (!airborne) v.airStartAt = 0;
-  v.wasOnGround = !airborne;
-  const useJumpFlip = airborne && jumpFlip != null && jumpFlip.frames.length >= 4;
 
   if (idx === 0 && percivalIdleBlit) {
     const movingH =
@@ -1599,16 +1656,9 @@ function drawPlayer(p) {
         : Math.abs(p.vx) > 0.1;
     const useHit = recoil > 0 && percivalHitBlit != null;
     const useRun =
-      !useHit && !useJumpFlip && percivalRun != null && percivalRun.frames.length >= 4 && movingH;
+      !useHit && percivalRun != null && percivalRun.frames.length >= 4 && movingH;
     const bl = useHit
       ? percivalHitBlit
-      : useJumpFlip
-        ? (() => {
-            const f = jumpFlip.frames;
-            const fi = Math.min(f.length - 1, Math.floor((now - v.airStartAt) / JUMP_FLIP_FRAME_MS));
-            const fr = f[fi];
-            return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
-          })()
       : useRun
         ? (() => {
             const f = percivalRun.frames;
@@ -1639,16 +1689,9 @@ function drawPlayer(p) {
         : Math.abs(p.vx) > 0.1;
     const useHit = recoil > 0 && guy2HitBlit != null;
     const useRun =
-      !useHit && !useJumpFlip && guy2Run != null && guy2Run.frames.length >= 4 && movingH;
+      !useHit && guy2Run != null && guy2Run.frames.length >= 4 && movingH;
     const bl = useHit
       ? guy2HitBlit
-      : useJumpFlip
-        ? (() => {
-            const f = jumpFlip.frames;
-            const fi = Math.min(f.length - 1, Math.floor((now - v.airStartAt) / JUMP_FLIP_FRAME_MS));
-            const fr = f[fi];
-            return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
-          })()
       : useRun
         ? (() => {
             const f = guy2Run.frames;
@@ -3149,8 +3192,6 @@ function localReset() {
     chargeKeyDownAt: 0,
     shootFlashUntil: 0,
     prevDrawX: undefined,
-    airStartAt: 0,
-    wasOnGround: true,
   };
   visualState[1] = {
     recoilUntil: 0,
@@ -3163,8 +3204,6 @@ function localReset() {
     chargeKeyDownAt: 0,
     shootFlashUntil: 0,
     prevDrawX: undefined,
-    airStartAt: 0,
-    wasOnGround: true,
   };
   syncRedThousandHpAfterLocalReset();
 }
@@ -3299,7 +3338,43 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) resetInputState();
 });
 
+function installMobileZoomGuards() {
+  if (!isTouchDevice) return;
+  let lastTapAt = 0;
+  const preventGesture = (e) => {
+    e.preventDefault();
+  };
+  document.addEventListener("gesturestart", preventGesture, { passive: false });
+  document.addEventListener("gesturechange", preventGesture, { passive: false });
+  document.addEventListener("gestureend", preventGesture, { passive: false });
+  document.addEventListener(
+    "dblclick",
+    (e) => {
+      if (e.target instanceof Element && e.target.closest("button, .game-wrap")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    { capture: true }
+  );
+  document.addEventListener(
+    "touchend",
+    (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (!target || !target.closest("button, .touch-overlay, #gameCanvas")) return;
+      const now = Date.now();
+      if (now - lastTapAt < 420) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      lastTapAt = now;
+    },
+    { capture: true, passive: false }
+  );
+}
+
 function setupUI() {
+  installMobileZoomGuards();
   if (touchOverlayEl) {
     const applyTouchAction = (action, pressed) => {
       if (action === "left") touchState.left = pressed;
@@ -3368,21 +3443,20 @@ function setupUI() {
     mode = "single";
     setMatchStatus("Single player mode.");
     localReset();
-    setArcadeStep("controls_p1");
+    setArcadeStep("character_p1");
     closeSettings();
   });
   document.getElementById("multiBtn").addEventListener("click", () => {
     mode = "multi";
     setMatchStatus("Local multiplayer (same keyboard).");
     localReset();
-    setArcadeStep("controls_p1");
+    setArcadeStep("character_p1");
     closeSettings();
   });
   document.getElementById("onlineBtn").addEventListener("click", () => {
     mode = "online";
     closeSettings();
-    if (touchState.enabled) setupSocket();
-    else setArcadeStep("controls_online");
+    setArcadeStep("character_p1");
   });
   document.getElementById("restartBtn").addEventListener("click", () => {
     localReset();
@@ -3461,18 +3535,39 @@ function setupUI() {
       mode = "single";
       localReset();
       setMatchStatus("Single player mode.");
-      setArcadeStep("controls_p1");
+      setArcadeStep("character_p1");
     }
     if (action === "multi") {
       mode = "multi";
       localReset();
       setMatchStatus("Local multiplayer (same keyboard).");
-      setArcadeStep("controls_p1");
+      setArcadeStep("character_p1");
     }
     if (action === "online") {
       mode = "online";
-      if (touchState.enabled) setupSocket();
-      else setArcadeStep("controls_online");
+      setArcadeStep("character_p1");
+    }
+    if (action === "select_character" || action === "select_weapon") {
+      const playerIdx = Number(t?.dataset?.playerIdx ?? "0") || 0;
+      const optionId = t?.dataset?.optionId || "";
+      const loadout = activeLoadoutForPlayer(playerIdx);
+      if (action === "select_character") {
+        if (!CHARACTER_OPTIONS.some((opt) => opt.enabled && opt.id === optionId)) return;
+        loadout.character = optionId;
+        setArcadeStep(nextStepAfterCharacter(playerIdx));
+      } else {
+        if (!WEAPON_OPTIONS.some((opt) => opt.enabled && opt.id === optionId)) return;
+        loadout.weapon = optionId;
+        if (mode === "online" && touchState.enabled) setupSocket();
+        else setArcadeStep(nextStepAfterWeapon(playerIdx));
+      }
+    }
+    if (action === "loadout_back") {
+      const playerIdx = Number(t?.dataset?.playerIdx ?? "0") || 0;
+      const kind = t?.dataset?.kind || "character";
+      if (kind === "weapon") setArcadeStep(`character_p${playerIdx + 1}`);
+      else if (mode === "multi" && playerIdx === 1) setArcadeStep("weapon_p1");
+      else setArcadeStep("mode");
     }
     if (action === "bind0_keep") {
       resetPlayerBindingsDefault(0);

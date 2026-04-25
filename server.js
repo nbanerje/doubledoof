@@ -786,7 +786,6 @@ setInterval(() => {
         id: p.id,
         x: p.x,
         y: p.y,
-        onGround: !!p.onGround,
         health: p.health,
         maxHealth: playerMaxHp(p),
         facing: p.facing,
