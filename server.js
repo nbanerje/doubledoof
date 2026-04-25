@@ -93,11 +93,14 @@ function findHostRoomId(userId) {
   return null;
 }
 
-function detachUserFromRooms(userId, exceptRoomId) {
+function detachUserFromRooms(userId, exceptRoomId, options = {}) {
+  const silent = !!options.silent;
   for (const [rid, room] of [...rooms.entries()]) {
     if (rid === exceptRoomId) continue;
     if (room.players[0].id === userId) {
-      io.to(rid).emit("match:end", { reason: "Host left the match" });
+      if (!silent) {
+        io.to(rid).emit("match:end", { reason: "Host left the match" });
+      }
       rooms.delete(rid);
     } else if (room.players[1].id === userId) {
       room.players[1].id = null;
@@ -555,7 +558,7 @@ io.on("connection", (socket) => {
         done({ ok: false, message });
         return;
       }
-      detachUserFromRooms(socket.userId, roomId);
+      detachUserFromRooms(socket.userId, roomId, { silent: true });
       const joined = attachGuestToRoom(roomId, socket.userId, socket.id);
       if (!joined.ok) {
         const message = joined.reason || "Could not join that host";
@@ -584,7 +587,7 @@ io.on("connection", (socket) => {
           socket.emit("game:error", { message: "That player's match is full" });
           return;
         }
-        detachUserFromRooms(socket.userId, targetHostRoomId);
+        detachUserFromRooms(socket.userId, targetHostRoomId, { silent: true });
         const joined = attachGuestToRoom(targetHostRoomId, socket.userId, socket.id);
         if (!joined.ok) {
           socket.emit("game:error", { message: joined.reason });
@@ -622,7 +625,7 @@ io.on("connection", (socket) => {
         socket.emit("game:error", { message: "That match no longer exists" });
         return;
       }
-      detachUserFromRooms(socket.userId, roomId);
+      detachUserFromRooms(socket.userId, roomId, { silent: true });
       const result = attachGuestToRoom(roomId, socket.userId, socket.id);
       if (!result.ok) {
         socket.emit("game:error", { message: result.reason });
