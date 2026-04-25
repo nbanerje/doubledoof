@@ -325,6 +325,8 @@ const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
 /** Charged shots per fighter per round (each projectile counts; triple uses 3). */
 const ORB_AMMO_PER_ROUND = 10;
+const AMMO_RELOAD_IDLE_MS = 5000;
+const AMMO_RELOAD_AMOUNT = 5;
 const POWER_BUFF_DAMAGE_MULT = 1.35;
 const BINDINGS_STORAGE_KEY = "bat-duel-bindings-v1";
 
@@ -1089,6 +1091,7 @@ let localState = {
       score: 0,
       color: "#2f7dff",
       orbAmmo: ORB_AMMO_PER_ROUND,
+      lastShotAt: Date.now(),
       jumpsUsed: 0,
       onGround: true,
       chargeStartAt: 0,
@@ -1103,6 +1106,7 @@ let localState = {
       score: 0,
       color: "#e44b4b",
       orbAmmo: ORB_AMMO_PER_ROUND,
+      lastShotAt: Date.now(),
       jumpsUsed: 0,
       onGround: true,
       chargeStartAt: 0,
@@ -2055,6 +2059,7 @@ function fireProjectile(attackerIdx, override = null) {
   } else {
     attacker.orbAmmo = ORB_AMMO_PER_ROUND;
   }
+  attacker.lastShotAt = Date.now();
   visualState[attackerIdx].shootFlashUntil = Date.now() + 120;
 }
 
@@ -2287,6 +2292,17 @@ function updateLocalGame() {
   if (Date.now() < roundLockUntil) return;
 
   // Guard against missed keyup when focus changes.
+  const now = Date.now();
+  for (const p of localState.players) {
+    if (p.infiniteAmmo) continue;
+    const ammo = p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND;
+    if (ammo >= ORB_AMMO_PER_ROUND) continue;
+    const lastShotAt = p.lastShotAt || 0;
+    if (now - lastShotAt >= AMMO_RELOAD_IDLE_MS) {
+      p.orbAmmo = Math.min(ORB_AMMO_PER_ROUND, ammo + AMMO_RELOAD_AMOUNT);
+      p.lastShotAt = now;
+    }
+  }
   const b0 = keyBindings.p0;
   const b1 = keyBindings.p1;
   if (!keys.has(p0FireKey()) && !touchState.orb) visualState[0].charging = false;
@@ -2630,6 +2646,7 @@ function localReset() {
         score: 0,
         color: "#2f7dff",
         orbAmmo: ORB_AMMO_PER_ROUND,
+        lastShotAt: Date.now(),
         jumpsUsed: 0,
         onGround: true,
         chargeStartAt: 0,
@@ -2644,6 +2661,7 @@ function localReset() {
         score: 0,
         color: "#e44b4b",
         orbAmmo: ORB_AMMO_PER_ROUND,
+        lastShotAt: Date.now(),
         jumpsUsed: 0,
         onGround: true,
         chargeStartAt: 0,

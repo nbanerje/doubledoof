@@ -28,6 +28,9 @@ const MELEE_RANGE = 48;
 const WINS_TO_END_MATCH = 5;
 const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
+const ORB_AMMO_PER_ROUND = 10;
+const AMMO_RELOAD_IDLE_MS = 5000;
+const AMMO_RELOAD_AMOUNT = 5;
 const VIEW_W = 1040;
 const FLOOR_Y = 560;
 const PLAYER_BODY_W = 36;
@@ -172,6 +175,8 @@ function createHostRoom(hostUserId, hostSocketId) {
       controls: {},
       charging: false,
       chargeStart: 0,
+      orbAmmo: ORB_AMMO_PER_ROUND,
+      lastShotAt: Date.now(),
       color: "#2f7dff",
     },
     {
@@ -189,6 +194,8 @@ function createHostRoom(hostUserId, hostSocketId) {
       controls: {},
       charging: false,
       chargeStart: 0,
+      orbAmmo: ORB_AMMO_PER_ROUND,
+      lastShotAt: Date.now(),
       color: "#e44b4b",
     },
   ];
@@ -461,6 +468,16 @@ function updateRoom(room) {
   if (room.lockUntil > now) return;
 
   for (const p of room.players) {
+    if (!p.infiniteAmmo) {
+      const ammo = p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND;
+      if (ammo < ORB_AMMO_PER_ROUND) {
+        const lastShotAt = p.lastShotAt || 0;
+        if (now - lastShotAt >= AMMO_RELOAD_IDLE_MS) {
+          p.orbAmmo = Math.min(ORB_AMMO_PER_ROUND, ammo + AMMO_RELOAD_AMOUNT);
+          p.lastShotAt = now;
+        }
+      }
+    }
     const left = !!p.controls.left;
     const right = !!p.controls.right;
     const jump = !!p.controls.jump;
@@ -523,6 +540,10 @@ function updateRoom(room) {
     room.intermissionStartedAt = Date.now();
     p0.health = playerMaxHp(p0);
     p1.health = playerMaxHp(p1);
+      p0.orbAmmo = ORB_AMMO_PER_ROUND;
+      p1.orbAmmo = ORB_AMMO_PER_ROUND;
+      p0.lastShotAt = Date.now();
+      p1.lastShotAt = Date.now();
     p0.x = 220;
     p1.x = 760;
     p0.y = PLAYER_TOP_Y;
@@ -566,6 +587,7 @@ setInterval(() => {
         score: p.score,
         color: p.color,
         charging: p.charging,
+        orbAmmo: p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND,
       })),
       projectiles: room.projectiles,
       lockUntil: room.lockUntil,
@@ -758,6 +780,12 @@ io.on("connection", (socket) => {
             enemy.health = Math.max(0, enemy.health - Math.round(10 * (player.damageMult || 1)));
           }
         } else {
+          const orbCost = player.tripleShot ? 3 : 1;
+          const ammo = player.orbAmmo != null ? player.orbAmmo : ORB_AMMO_PER_ROUND;
+          if (!player.infiniteAmmo && ammo < orbCost) {
+            player.charging = false;
+            return;
+          }
           const cappedMs = player.instantMaxCharge
             ? CHARGE_SCALE_MS
             : Math.min(heldMs, MAX_CHARGE_MS);
@@ -782,6 +810,12 @@ io.on("connection", (socket) => {
           } else {
             spawn(player.facing * shot.speed, 0);
           }
+          if (!player.infiniteAmmo) {
+            player.orbAmmo = ammo - orbCost;
+          } else {
+            player.orbAmmo = ORB_AMMO_PER_ROUND;
+          }
+          player.lastShotAt = Date.now();
         }
         player.charging = false;
       }
