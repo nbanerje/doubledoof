@@ -126,7 +126,6 @@ button:hover {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  touch-action: none;
 }
 
 #gameCanvas {
@@ -390,7 +389,7 @@ button:hover {
   width: min(100%, 1040px);
   height: auto;
   background: #0f1322;
-  touch-action: none;
+  touch-action: auto;
 }
 
 .round-banner {
@@ -662,8 +661,6 @@ button.lobby-decline {
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   z-index: 7;
   pointer-events: none;
-  user-select: none;
-  -webkit-user-select: none;
 }
 
 .touch-cluster {
@@ -706,20 +703,21 @@ button.lobby-decline {
 
 @media (max-width: 768px) {
   .app {
-    padding: 0;
+    padding: 8px;
   }
 
   .game-wrap {
-    width: 100vw;
-    min-height: 100dvh;
-    align-items: center;
+    width: 100%;
+    min-height: auto;
+    align-items: flex-start;
   }
 
   #gameCanvas {
-    width: 100vw;
-    max-height: 100dvh;
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
+    width: min(100%, calc((100dvh - 110px) * 1.677));
+    max-width: 100%;
+    height: auto;
+    max-height: calc(100dvh - 110px);
+    margin: 0 auto;
+    border-radius: 10px;
   }
 }
