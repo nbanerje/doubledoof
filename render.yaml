@@ -1,0 +1,25 @@
+# Render Blueprint: Web only — paste Neon `DB_URL` in the dashboard when prompted.
+# Custom host: doubledoof.peoplesrobotics.com (add DNS CNAME after first deploy; see README).
+# Deploy: Dashboard → New → Blueprint → connect repo → Deploy Blueprint.
+
+services:
+  - type: web
+    name: doubledoof
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    domains:
+      - doubledoof.peoplesrobotics.com
+    envVars:
+      - key: DB_URL
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_SES_REGION
+        sync: false
+      - key: AWS_SES_FROM_EMAIL
+        sync: false
