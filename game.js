@@ -1140,10 +1140,12 @@ const touchState = {
   right: false,
   jump: false,
   attack: false,
+  orb: false,
   prevLeft: false,
   prevRight: false,
   prevJump: false,
   prevAttack: false,
+  prevOrb: false,
 };
 
 function onlineControlsFromInput() {
@@ -1151,6 +1153,7 @@ function onlineControlsFromInput() {
   return {
     left: keys.has(ok.left) || touchState.left,
     right: keys.has(ok.right) || touchState.right,
+    jump: keys.has(ok.jump) || touchState.jump,
   };
 }
 
@@ -1649,6 +1652,7 @@ function applyTouchInput() {
     touchState.prevRight = touchState.right;
     touchState.prevJump = touchState.jump;
     touchState.prevAttack = touchState.attack;
+    touchState.prevOrb = touchState.orb;
     return;
   }
 
@@ -1657,7 +1661,10 @@ function applyTouchInput() {
     if (touchState.jump && !touchState.prevJump) {
       tryJump(0, b0.jump);
     }
-    if (touchState.attack && !touchState.prevAttack && !visualState[0].charging) {
+    if (touchState.attack && !touchState.prevAttack) {
+      doMelee(0);
+    }
+    if (touchState.orb && !touchState.prevOrb && !visualState[0].charging) {
       if (Date.now() >= roundLockUntil) {
         const p0 = localState.players[0];
         const a0 = p0.orbAmmo != null ? p0.orbAmmo : ORB_AMMO_PER_ROUND;
@@ -1667,7 +1674,7 @@ function applyTouchInput() {
         }
       }
     }
-    if (!touchState.attack && touchState.prevAttack) {
+    if (!touchState.orb && touchState.prevOrb) {
       const wasCharging = visualState[0].charging;
       const heldMs = Date.now() - localState.players[0].chargeStartAt;
       visualState[0].charging = false;
@@ -1681,11 +1688,15 @@ function applyTouchInput() {
       socket.emit("match:input", { controls });
     }
     if (touchState.attack && !touchState.prevAttack && !onlineIntermissionActive()) {
+      socket.emit("match:input", { action: "chargeStart", controls });
+      socket.emit("match:input", { action: "chargeRelease", controls });
+    }
+    if (touchState.orb && !touchState.prevOrb && !onlineIntermissionActive()) {
       visualState[playerIndex].charging = true;
       visualState[playerIndex].chargeKeyDownAt = Date.now();
       socket.emit("match:input", { action: "chargeStart", controls });
     }
-    if (!touchState.attack && touchState.prevAttack && !onlineIntermissionActive()) {
+    if (!touchState.orb && touchState.prevOrb && !onlineIntermissionActive()) {
       visualState[playerIndex].charging = false;
       triggerSwing(playerIndex);
       socket.emit("match:input", { action: "chargeRelease", controls });
@@ -1696,6 +1707,7 @@ function applyTouchInput() {
   touchState.prevRight = touchState.right;
   touchState.prevJump = touchState.jump;
   touchState.prevAttack = touchState.attack;
+  touchState.prevOrb = touchState.orb;
 }
 
 /** Horizontal stepped sky (no smooth gradients) for pixel look. */
@@ -2052,10 +2064,12 @@ function resetInputState() {
   touchState.right = false;
   touchState.jump = false;
   touchState.attack = false;
+  touchState.orb = false;
   touchState.prevLeft = false;
   touchState.prevRight = false;
   touchState.prevJump = false;
   touchState.prevAttack = false;
+  touchState.prevOrb = false;
   visualState[0].charging = false;
   visualState[1].charging = false;
 }
@@ -2266,7 +2280,7 @@ function updateLocalGame() {
   // Guard against missed keyup when focus changes.
   const b0 = keyBindings.p0;
   const b1 = keyBindings.p1;
-  if (!keys.has(p0FireKey()) && !touchState.attack) visualState[0].charging = false;
+  if (!keys.has(p0FireKey()) && !touchState.orb) visualState[0].charging = false;
   if (!keys.has(p1FireKey())) visualState[1].charging = false;
 
   const p1 = localState.players[0];
@@ -2543,6 +2557,10 @@ function setupSocket() {
       buffPickLoser: 0,
       buffPickInputUnlocked: false,
     };
+    for (let i = 0; i < 2; i += 1) {
+      if (!visualState[i]) continue;
+      visualState[i].charging = !!localState.players[i]?.charging;
+    }
   });
 
   socket.on("match:end", ({ reason }) => {
@@ -2770,6 +2788,7 @@ function setupUI() {
       if (action === "right") touchState.right = pressed;
       if (action === "jump") touchState.jump = pressed;
       if (action === "attack") touchState.attack = pressed;
+      if (action === "orb") touchState.orb = pressed;
     };
 
     touchOverlayEl.querySelectorAll("[data-touch-action]").forEach((btn) => {
@@ -2805,7 +2824,8 @@ function setupUI() {
   document.getElementById("onlineBtn").addEventListener("click", () => {
     mode = "online";
     closeSettings();
-    setupSocket();
+    if (touchState.enabled) setupSocket();
+    else setArcadeStep("controls_online");
   });
   document.getElementById("restartBtn").addEventListener("click", () => {
     localReset();
@@ -2894,7 +2914,8 @@ function setupUI() {
     }
     if (action === "online") {
       mode = "online";
-      setupSocket();
+      if (touchState.enabled) setupSocket();
+      else setArcadeStep("controls_online");
     }
     if (action === "bind0_keep") {
       resetPlayerBindingsDefault(0);

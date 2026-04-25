@@ -32,6 +32,8 @@ const FLOOR_Y = 560;
 const PLAYER_BODY_W = 36;
 const PLAYER_BODY_H = 48;
 const PLAYER_TOP_Y = FLOOR_Y - PLAYER_BODY_H;
+const GRAVITY = 0.7;
+const JUMP_VELOCITY = -12.5;
 
 function chargedShotFromHeldMs(heldMs) {
   const effective = Math.max(0, Math.min(heldMs - CHARGE_THRESHOLD_MS, CHARGE_SCALE_MS));
@@ -125,8 +127,11 @@ function createHostRoom(hostUserId, hostSocketId) {
       id: hostUserId,
       socketId: hostSocketId,
       x: 220,
-      y: 0,
+      y: PLAYER_TOP_Y,
       vx: 0,
+      vy: 0,
+      onGround: true,
+      jumpHeld: false,
       health: 100,
       facing: 1,
       score: 0,
@@ -139,8 +144,11 @@ function createHostRoom(hostUserId, hostSocketId) {
       id: null,
       socketId: null,
       x: 760,
-      y: 0,
+      y: PLAYER_TOP_Y,
       vx: 0,
+      vy: 0,
+      onGround: true,
+      jumpHeld: false,
       health: 100,
       facing: -1,
       score: 0,
@@ -409,6 +417,7 @@ function updateRoom(room) {
   for (const p of room.players) {
     const left = !!p.controls.left;
     const right = !!p.controls.right;
+    const jump = !!p.controls.jump;
     p.vx = 0;
     if (left && !right) {
       p.vx = -4;
@@ -417,6 +426,18 @@ function updateRoom(room) {
     if (right && !left) {
       p.vx = 4;
       p.facing = 1;
+    }
+    if (jump && !p.jumpHeld && p.onGround) {
+      p.vy = JUMP_VELOCITY;
+      p.onGround = false;
+    }
+    p.jumpHeld = jump;
+    p.vy += GRAVITY;
+    p.y += p.vy;
+    if (p.y >= PLAYER_TOP_Y) {
+      p.y = PLAYER_TOP_Y;
+      p.vy = 0;
+      p.onGround = true;
     }
     p.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, p.x + p.vx));
   }
@@ -430,8 +451,8 @@ function updateRoom(room) {
     const hit =
       shot.x < target.x + PLAYER_BODY_W &&
       shot.x + shot.w > target.x &&
-      shot.y < PLAYER_TOP_Y + PLAYER_BODY_H &&
-      shot.y + shot.h > PLAYER_TOP_Y;
+      shot.y < target.y + PLAYER_BODY_H &&
+      shot.y + shot.h > target.y;
     if (hit) {
       target.health = Math.max(0, target.health - shot.damage);
       shot.dead = true;
@@ -458,6 +479,12 @@ function updateRoom(room) {
     p1.health = 100;
     p0.x = 220;
     p1.x = 760;
+    p0.y = PLAYER_TOP_Y;
+    p1.y = PLAYER_TOP_Y;
+    p0.vy = 0;
+    p1.vy = 0;
+    p0.onGround = true;
+    p1.onGround = true;
     room.projectiles = [];
     room.players.forEach((p) => {
       p.charging = false;
@@ -474,10 +501,12 @@ setInterval(() => {
       players: room.players.map((p) => ({
         id: p.id,
         x: p.x,
+        y: p.y,
         health: p.health,
         facing: p.facing,
         score: p.score,
         color: p.color,
+        charging: p.charging,
       })),
       projectiles: room.projectiles,
       lockUntil: room.lockUntil,
