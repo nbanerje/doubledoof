@@ -50,6 +50,7 @@ const FIRE_BREATH_H = 20;
 const FIRE_BREATH_TICK_MS = 100;
 const FIRE_BREATH_BASE_DAMAGE = 3;
 const FIRE_BREATH_SLOW_MULT = 0.42;
+const FIRE_BREATH_GROWTH_PER_TICK = 0.01;
 const LEVEL_PLATFORMS = [
   [
     { x: 140, y: 490, w: 180, h: 14 },
@@ -134,12 +135,16 @@ function rectsOverlap(a, b) {
 
 function fireBreathRectForPlayer(p) {
   const fac = p.facing || 1;
-  const x = fac > 0 ? p.x + PLAYER_BODY_W : p.x - FIRE_BREATH_RANGE;
+  const heldMs = Math.max(0, Date.now() - (p.fireStartAt || Date.now()));
+  const scale = 1 + Math.floor(heldMs / FIRE_BREATH_TICK_MS) * FIRE_BREATH_GROWTH_PER_TICK;
+  const range = FIRE_BREATH_RANGE * scale;
+  const height = FIRE_BREATH_H * scale;
+  const x = fac > 0 ? p.x + PLAYER_BODY_W : p.x - range;
   return {
     x,
-    y: p.y + Math.floor(PLAYER_BODY_H * 0.32),
-    w: FIRE_BREATH_RANGE,
-    h: FIRE_BREATH_H,
+    y: p.y + Math.floor(PLAYER_BODY_H * 0.42) - height / 2,
+    w: range,
+    h: height,
   };
 }
 

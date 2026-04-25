@@ -377,6 +377,7 @@ const FIRE_BREATH_H = 20;
 const FIRE_BREATH_TICK_MS = 100;
 const FIRE_BREATH_BASE_DAMAGE = 3;
 const FIRE_BREATH_SLOW_MULT = 0.42;
+const FIRE_BREATH_GROWTH_PER_TICK = 0.01;
 const DEFAULT_MAX_HP = 100;
 const TANK_BUFF_MAX_HP = 130;
 /** A match ends as soon as one side reaches this many round wins. */
@@ -408,8 +409,12 @@ const GUY2_RUN_URLS = [
 ];
 const GUY2_HIT_URL = "./assets/guy2-hit.png";
 const MELEE_SWORD_URL = "./assets/melee-sword.png";
+const FIRE_BREATH_RIGHT_URL = "./assets/fire-breath-right.png";
+const FIRE_BREATH_LEFT_URL = "./assets/fire-breath-left.png";
 const percivalIdleImage = new Image();
 const meleeSwordImage = new Image();
+const fireBreathRightImage = new Image();
+const fireBreathLeftImage = new Image();
 const percivalHitImage = new Image();
 const guy2IdleImage = new Image();
 const guy2HitImage = new Image();
@@ -549,6 +554,9 @@ function initMeleeSwordBlit() {
 meleeSwordImage.onload = initMeleeSwordBlit;
 meleeSwordImage.src = MELEE_SWORD_URL;
 if (meleeSwordImage.complete) initMeleeSwordBlit();
+
+fireBreathRightImage.src = FIRE_BREATH_RIGHT_URL;
+fireBreathLeftImage.src = FIRE_BREATH_LEFT_URL;
 
 function tryInitGuy2Run() {
   for (let i = 0; i < guy2RunImages.length; i += 1) {
@@ -1988,12 +1996,16 @@ function drawPlatforms() {
 function fireBreathRectForPlayer(p) {
   const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
   const fac = p.facing || 1;
-  const x = fac > 0 ? p.x + PLAYER_BODY_W : p.x - FIRE_BREATH_RANGE;
+  const heldMs = Math.max(0, Date.now() - (p.fireStartAt || Date.now()));
+  const scale = 1 + Math.floor(heldMs / FIRE_BREATH_TICK_MS) * FIRE_BREATH_GROWTH_PER_TICK;
+  const range = FIRE_BREATH_RANGE * scale;
+  const height = FIRE_BREATH_H * scale;
+  const x = fac > 0 ? p.x + PLAYER_BODY_W : p.x - range;
   return {
     x,
-    y: baseY + Math.floor(PLAYER_BODY_H * 0.32),
-    w: FIRE_BREATH_RANGE,
-    h: FIRE_BREATH_H,
+    y: baseY + Math.floor(PLAYER_BODY_H * 0.42) - height / 2,
+    w: range,
+    h: height,
   };
 }
 
@@ -2013,20 +2025,21 @@ function drawFireBreath(p) {
   if (!p.fireBreathing) return;
   const r = fireBreathRectForPlayer(p);
   const held = Math.max(0, Date.now() - (p.fireStartAt || Date.now()));
-  const pulse = 0.72 + 0.16 * Math.sin(performance.now() * 0.03);
+  const img = p.facing >= 0 ? fireBreathRightImage : fireBreathLeftImage;
+  const pulse = 1 + 0.06 * Math.sin(performance.now() * 0.035);
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = `rgba(255, 86, 22, ${pulse})`;
-  ctx.fillRect(Math.floor(r.x), Math.floor(r.y), Math.ceil(r.w), Math.ceil(r.h));
-  ctx.fillStyle = "rgba(255, 210, 74, 0.85)";
-  ctx.fillRect(Math.floor(r.x), Math.floor(r.y + 4), Math.ceil(r.w * 0.84), Math.max(4, Math.floor(r.h * 0.38)));
-  ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
-  ctx.fillRect(Math.floor(r.x), Math.floor(r.y + 7), Math.ceil(r.w * 0.52), 3);
-  ctx.fillStyle = "rgba(130, 20, 10, 0.5)";
-  const tip = p.facing >= 0 ? r.x + r.w - 6 : r.x + 2;
-  for (let i = 0; i < 5; i += 1) {
-    const yy = r.y + 2 + ((i * 5 + Math.floor(held / 80)) % r.h);
-    ctx.fillRect(Math.floor(tip), Math.floor(yy), 5, 2);
+  ctx.globalCompositeOperation = "lighter";
+  if (img.complete && img.naturalWidth) {
+    const h = Math.round(r.h * 2.4 * pulse);
+    const w = Math.round(r.w * 1.22);
+    const jitter = Math.sin(held * 0.026) * 2;
+    const x = p.facing >= 0 ? r.x - 3 : r.x + r.w - w + 3;
+    const y = r.y + r.h / 2 - h / 2 + jitter;
+    ctx.drawImage(img, Math.floor(x), Math.floor(y), w, h);
+  } else {
+    ctx.fillStyle = "rgba(255, 86, 22, 0.78)";
+    ctx.fillRect(Math.floor(r.x), Math.floor(r.y), Math.ceil(r.w), Math.ceil(r.h));
   }
   ctx.restore();
 }
