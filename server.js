@@ -69,6 +69,26 @@ const BUFF_POOL = [
   "ricochetOrb",
   "trapSeed",
   "echoSlash",
+  "fungalBloom",
+  "sporeDash",
+  "thornSkin",
+  "rootPrison",
+  "toxicBurst",
+  "adrenalBite",
+  "orbLeech",
+  "chainRot",
+  "phaseStep",
+  "gravityWell",
+  "overgrowthArmor",
+  "bloodPact",
+  "reboundGuard",
+  "ambushSeed",
+  "echoOrb",
+  "predatorInstinct",
+  "manaBattery",
+  "windCut",
+  "snapFreeze",
+  "lastStand",
 ];
 /** Fire Breath is much more likely when the loser is Dragon (matches client bias). */
 const BUFF_DRAGON_FIRE_BREATH_PICK_WEIGHT = 8;
@@ -359,6 +379,50 @@ function removeBuffEffectsFromPlayer(player, buffId) {
   } else if (buffId === "echoSlash") {
     delete player.echoSlash;
     delete player.echoSlashTier;
+  } else if (buffId === "fungalBloom") {
+    delete player.fungalBloomTier;
+  } else if (buffId === "sporeDash") {
+    delete player.sporeDashTier;
+  } else if (buffId === "thornSkin") {
+    delete player.thornSkinTier;
+  } else if (buffId === "rootPrison") {
+    delete player.rootPrisonTier;
+  } else if (buffId === "toxicBurst") {
+    delete player.toxicBurstTier;
+  } else if (buffId === "adrenalBite") {
+    delete player.adrenalBiteTier;
+    delete player.adrenalBiteUntil;
+  } else if (buffId === "orbLeech") {
+    delete player.orbLeechTier;
+  } else if (buffId === "chainRot") {
+    delete player.chainRotTier;
+  } else if (buffId === "phaseStep") {
+    delete player.phaseStepTier;
+  } else if (buffId === "gravityWell") {
+    delete player.gravityWellTier;
+  } else if (buffId === "overgrowthArmor") {
+    delete player.overgrowthArmorTier;
+    delete player.overgrowthStillAt;
+  } else if (buffId === "bloodPact") {
+    delete player.bloodPactTier;
+  } else if (buffId === "reboundGuard") {
+    delete player.reboundGuardTier;
+  } else if (buffId === "ambushSeed") {
+    delete player.ambushSeedTier;
+  } else if (buffId === "echoOrb") {
+    delete player.echoOrbTier;
+    delete player.echoOrbCounter;
+  } else if (buffId === "predatorInstinct") {
+    delete player.predatorInstinctTier;
+  } else if (buffId === "manaBattery") {
+    delete player.manaBatteryTier;
+  } else if (buffId === "windCut") {
+    delete player.windCutTier;
+  } else if (buffId === "snapFreeze") {
+    delete player.snapFreezeTier;
+  } else if (buffId === "lastStand") {
+    delete player.lastStandTier;
+    delete player.lastStandUsedRound;
   }
 }
 
@@ -539,6 +603,47 @@ function applyBuffToPlayerOnline(player, buffId, replaceBuffId = null) {
       player.echoSlash = true;
       player.echoSlashTier = 1;
     }
+  } else if (buffId === "fungalBloom") {
+    player.fungalBloomTier = (player.fungalBloomTier || 0) + 1;
+  } else if (buffId === "sporeDash") {
+    player.sporeDashTier = (player.sporeDashTier || 0) + 1;
+  } else if (buffId === "thornSkin") {
+    player.thornSkinTier = (player.thornSkinTier || 0) + 1;
+  } else if (buffId === "rootPrison") {
+    player.rootPrisonTier = (player.rootPrisonTier || 0) + 1;
+  } else if (buffId === "toxicBurst") {
+    player.toxicBurstTier = (player.toxicBurstTier || 0) + 1;
+  } else if (buffId === "adrenalBite") {
+    player.adrenalBiteTier = (player.adrenalBiteTier || 0) + 1;
+  } else if (buffId === "orbLeech") {
+    player.orbLeechTier = (player.orbLeechTier || 0) + 1;
+  } else if (buffId === "chainRot") {
+    player.chainRotTier = (player.chainRotTier || 0) + 1;
+  } else if (buffId === "phaseStep") {
+    player.phaseStepTier = (player.phaseStepTier || 0) + 1;
+  } else if (buffId === "gravityWell") {
+    player.gravityWellTier = (player.gravityWellTier || 0) + 1;
+  } else if (buffId === "overgrowthArmor") {
+    player.overgrowthArmorTier = (player.overgrowthArmorTier || 0) + 1;
+  } else if (buffId === "bloodPact") {
+    player.bloodPactTier = (player.bloodPactTier || 0) + 1;
+  } else if (buffId === "reboundGuard") {
+    player.reboundGuardTier = (player.reboundGuardTier || 0) + 1;
+  } else if (buffId === "ambushSeed") {
+    player.ambushSeedTier = (player.ambushSeedTier || 0) + 1;
+  } else if (buffId === "echoOrb") {
+    player.echoOrbTier = (player.echoOrbTier || 0) + 1;
+  } else if (buffId === "predatorInstinct") {
+    player.predatorInstinctTier = (player.predatorInstinctTier || 0) + 1;
+  } else if (buffId === "manaBattery") {
+    player.manaBatteryTier = (player.manaBatteryTier || 0) + 1;
+  } else if (buffId === "windCut") {
+    player.windCutTier = (player.windCutTier || 0) + 1;
+  } else if (buffId === "snapFreeze") {
+    player.snapFreezeTier = (player.snapFreezeTier || 0) + 1;
+  } else if (buffId === "lastStand") {
+    player.lastStandTier = (player.lastStandTier || 0) + 1;
+    player.lastStandUsedRound = false;
   } else {
     return { ok: false, reason: "invalid" };
   }

@@ -299,6 +299,26 @@ const BUFF_POOL = [
   "ricochetOrb",
   "trapSeed",
   "echoSlash",
+  "fungalBloom",
+  "sporeDash",
+  "thornSkin",
+  "rootPrison",
+  "toxicBurst",
+  "adrenalBite",
+  "orbLeech",
+  "chainRot",
+  "phaseStep",
+  "gravityWell",
+  "overgrowthArmor",
+  "bloodPact",
+  "reboundGuard",
+  "ambushSeed",
+  "echoOrb",
+  "predatorInstinct",
+  "manaBattery",
+  "windCut",
+  "snapFreeze",
+  "lastStand",
 ];
 const BUFF_DEFS = {
   triple: { name: "Triple shot", desc: "Each charged release fires 3 orbs", icon: "🔺" },
@@ -323,6 +343,26 @@ const BUFF_DEFS = {
   ricochetOrb: { name: "Ricochet Orb", desc: "Orbs bounce once off walls/platforms (stacks)", icon: "🪃" },
   trapSeed: { name: "Trap Seed", desc: "Melee plants a seed spot; stepping in poisons for 10s (2 dmg/sec)", icon: "🌱" },
   echoSlash: { name: "Echo Slash", desc: "Melee hits add bonus echo damage (stacks)", icon: "👻" },
+  fungalBloom: { name: "Fungal Bloom", desc: "Damaging poisoned foes spawns toxic bloom spots", icon: "🍄" },
+  sporeDash: { name: "Spore Dash", desc: "Jumping grants a short burst of speed", icon: "🏃" },
+  thornSkin: { name: "Thorn Skin", desc: "Melee attackers take reflect damage", icon: "🌵" },
+  rootPrison: { name: "Root Prison", desc: "First trap trigger each round also roots", icon: "🪢" },
+  toxicBurst: { name: "Toxic Burst", desc: "Poison ending pops for bonus damage", icon: "🧪" },
+  adrenalBite: { name: "Adrenal Bite", desc: "Taking damage grants a short damage boost", icon: "❤️‍🔥" },
+  orbLeech: { name: "Orb Leech", desc: "Orb hits heal you for a small amount", icon: "🧲" },
+  chainRot: { name: "Chain Rot", desc: "Poisoned targets are easier to keep poisoned", icon: "🦠" },
+  phaseStep: { name: "Phase Step", desc: "Ignore first knockback each round", icon: "👣" },
+  gravityWell: { name: "Gravity Well", desc: "Orb hits pull enemies toward impact", icon: "🕳️" },
+  overgrowthArmor: { name: "Overgrowth Armor", desc: "Standing still grants damage reduction", icon: "🪵" },
+  bloodPact: { name: "Blood Pact", desc: "Melee can consume HP to hit much harder", icon: "🩹" },
+  reboundGuard: { name: "Rebound Guard", desc: "Air hits bounce you upward", icon: "⤴️" },
+  ambushSeed: { name: "Ambush Seed", desc: "Trap seeds become harder to see", icon: "🥷" },
+  echoOrb: { name: "Echo Orb", desc: "Every few orb shots emit a delayed echo orb", icon: "📡" },
+  predatorInstinct: { name: "Predator Instinct", desc: "Bonus damage vs low-HP enemies", icon: "🦈" },
+  manaBattery: { name: "Mana Battery", desc: "Melee hits refund orb ammo", icon: "🔋" },
+  windCut: { name: "Wind Cut", desc: "Melee sends a short-range slash projectile", icon: "🌬️" },
+  snapFreeze: { name: "Snap Freeze", desc: "After unfreezing, your next hit roots briefly", icon: "🧊" },
+  lastStand: { name: "Last Stand", desc: "Once per round, survive lethal damage at 1 HP", icon: "🛟" },
 };
 
 function shuffleInPlace(a) {
@@ -474,6 +514,22 @@ const TRAP_SEED_SPOT_H = 8;
 const TRAP_SEED_SPOT_DURATION_MS = 10000;
 const ECHO_SLASH_BONUS_FRAC = 0.5;
 const ECHO_SLASH_STACK_BONUS_FRAC = 0.15;
+const THORN_SKIN_REFLECT = 0.25;
+const ADRENAL_BITE_MS = 3000;
+const ADRENAL_BITE_BONUS = 0.2;
+const ORB_LEECH_HEAL = 2;
+const PHASE_STEP_REDUCE_KB = 0;
+const GRAVITY_WELL_PULL = 24;
+const OVERGROWTH_ARMOR_STILL_MS = 2000;
+const OVERGROWTH_ARMOR_DR = 0.25;
+const BLOOD_PACT_HP_COST = 10;
+const BLOOD_PACT_BONUS = 0.5;
+const ECHO_ORB_INTERVAL = 3;
+const PREDATOR_INSTINCT_THRESHOLD = 0.3;
+const PREDATOR_INSTINCT_BONUS = 0.25;
+const MANA_BATTERY_REFUND = 1;
+const SNAP_FREEZE_ROOT_MS = 1000;
+const TOXIC_BURST_DAMAGE = 8;
 const BINDINGS_STORAGE_KEY = "bat-duel-bindings-v1";
 
 const PERCIVAL_IDLE_URL = "./assets/percival-idle.png";
@@ -2494,15 +2550,25 @@ function drawProjectile(s) {
     const y = Math.floor(s.y);
     const w = Math.max(6, Math.ceil(s.w || TRAP_SEED_SPOT_W));
     const h = Math.max(4, Math.ceil(s.h || TRAP_SEED_SPOT_H));
-    const pulse = 0.75 + 0.25 * Math.sin(performance.now() * 0.012);
+    const pulse = 0.7 + 0.3 * Math.sin(performance.now() * 0.014);
+    const ring = 2 + Math.round((1 - pulse) * 3);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = `rgba(72, 190, 95, ${0.45 * pulse})`;
-    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
-    ctx.fillStyle = "#38a757";
+    // High-contrast warning halo so trap location is obvious on any stage.
+    ctx.fillStyle = `rgba(255, 72, 72, ${0.35 * pulse})`;
+    ctx.fillRect(x - ring, y - ring, w + ring * 2, h + ring * 2);
+    ctx.strokeStyle = "#ffea4d";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = "#27b84f";
     ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = "#9df6af";
-    ctx.fillRect(x + 2, y + 2, Math.max(2, w - 4), 2);
+    ctx.fillStyle = "#d7ff7f";
+    ctx.fillRect(x + 1, y + 1, w - 2, 2);
+    // Center warning marker.
+    const cx = x + Math.floor(w / 2);
+    const cy = y + Math.floor(h / 2);
+    ctx.fillStyle = "#1b2b1d";
+    ctx.fillRect(cx - 1, cy - 1, 3, 3);
     ctx.restore();
     return;
   }
@@ -3354,6 +3420,30 @@ function clearCombatBuffsFromPlayers() {
     delete p.trapSeedUsesLeft;
     delete p.echoSlash;
     delete p.echoSlashTier;
+    delete p.fungalBloomTier;
+    delete p.sporeDashTier;
+    delete p.thornSkinTier;
+    delete p.rootPrisonTier;
+    delete p.toxicBurstTier;
+    delete p.adrenalBiteTier;
+    delete p.adrenalBiteUntil;
+    delete p.orbLeechTier;
+    delete p.chainRotTier;
+    delete p.phaseStepTier;
+    delete p.gravityWellTier;
+    delete p.overgrowthArmorTier;
+    delete p.overgrowthStillAt;
+    delete p.bloodPactTier;
+    delete p.reboundGuardTier;
+    delete p.ambushSeedTier;
+    delete p.echoOrbTier;
+    delete p.echoOrbCounter;
+    delete p.predatorInstinctTier;
+    delete p.manaBatteryTier;
+    delete p.windCutTier;
+    delete p.snapFreezeTier;
+    delete p.lastStandTier;
+    delete p.lastStandUsedRound;
     delete p.cardLoadout;
   }
 }
@@ -3735,6 +3825,50 @@ function removeBuffEffectsFromPlayer(p, buffId) {
   } else if (buffId === "echoSlash") {
     delete p.echoSlash;
     delete p.echoSlashTier;
+  } else if (buffId === "fungalBloom") {
+    delete p.fungalBloomTier;
+  } else if (buffId === "sporeDash") {
+    delete p.sporeDashTier;
+  } else if (buffId === "thornSkin") {
+    delete p.thornSkinTier;
+  } else if (buffId === "rootPrison") {
+    delete p.rootPrisonTier;
+  } else if (buffId === "toxicBurst") {
+    delete p.toxicBurstTier;
+  } else if (buffId === "adrenalBite") {
+    delete p.adrenalBiteTier;
+    delete p.adrenalBiteUntil;
+  } else if (buffId === "orbLeech") {
+    delete p.orbLeechTier;
+  } else if (buffId === "chainRot") {
+    delete p.chainRotTier;
+  } else if (buffId === "phaseStep") {
+    delete p.phaseStepTier;
+  } else if (buffId === "gravityWell") {
+    delete p.gravityWellTier;
+  } else if (buffId === "overgrowthArmor") {
+    delete p.overgrowthArmorTier;
+    delete p.overgrowthStillAt;
+  } else if (buffId === "bloodPact") {
+    delete p.bloodPactTier;
+  } else if (buffId === "reboundGuard") {
+    delete p.reboundGuardTier;
+  } else if (buffId === "ambushSeed") {
+    delete p.ambushSeedTier;
+  } else if (buffId === "echoOrb") {
+    delete p.echoOrbTier;
+    delete p.echoOrbCounter;
+  } else if (buffId === "predatorInstinct") {
+    delete p.predatorInstinctTier;
+  } else if (buffId === "manaBattery") {
+    delete p.manaBatteryTier;
+  } else if (buffId === "windCut") {
+    delete p.windCutTier;
+  } else if (buffId === "snapFreeze") {
+    delete p.snapFreezeTier;
+  } else if (buffId === "lastStand") {
+    delete p.lastStandTier;
+    delete p.lastStandUsedRound;
   }
 }
 
@@ -3875,6 +4009,47 @@ function applyOrUpgradeBuffToPlayer(L, loserIdx, buffId, replaceBuffId = null) {
       L.echoSlash = true;
       L.echoSlashTier = 1;
     }
+  } else if (buffId === "fungalBloom") {
+    L.fungalBloomTier = (L.fungalBloomTier || 0) + 1;
+  } else if (buffId === "sporeDash") {
+    L.sporeDashTier = (L.sporeDashTier || 0) + 1;
+  } else if (buffId === "thornSkin") {
+    L.thornSkinTier = (L.thornSkinTier || 0) + 1;
+  } else if (buffId === "rootPrison") {
+    L.rootPrisonTier = (L.rootPrisonTier || 0) + 1;
+  } else if (buffId === "toxicBurst") {
+    L.toxicBurstTier = (L.toxicBurstTier || 0) + 1;
+  } else if (buffId === "adrenalBite") {
+    L.adrenalBiteTier = (L.adrenalBiteTier || 0) + 1;
+  } else if (buffId === "orbLeech") {
+    L.orbLeechTier = (L.orbLeechTier || 0) + 1;
+  } else if (buffId === "chainRot") {
+    L.chainRotTier = (L.chainRotTier || 0) + 1;
+  } else if (buffId === "phaseStep") {
+    L.phaseStepTier = (L.phaseStepTier || 0) + 1;
+  } else if (buffId === "gravityWell") {
+    L.gravityWellTier = (L.gravityWellTier || 0) + 1;
+  } else if (buffId === "overgrowthArmor") {
+    L.overgrowthArmorTier = (L.overgrowthArmorTier || 0) + 1;
+  } else if (buffId === "bloodPact") {
+    L.bloodPactTier = (L.bloodPactTier || 0) + 1;
+  } else if (buffId === "reboundGuard") {
+    L.reboundGuardTier = (L.reboundGuardTier || 0) + 1;
+  } else if (buffId === "ambushSeed") {
+    L.ambushSeedTier = (L.ambushSeedTier || 0) + 1;
+  } else if (buffId === "echoOrb") {
+    L.echoOrbTier = (L.echoOrbTier || 0) + 1;
+  } else if (buffId === "predatorInstinct") {
+    L.predatorInstinctTier = (L.predatorInstinctTier || 0) + 1;
+  } else if (buffId === "manaBattery") {
+    L.manaBatteryTier = (L.manaBatteryTier || 0) + 1;
+  } else if (buffId === "windCut") {
+    L.windCutTier = (L.windCutTier || 0) + 1;
+  } else if (buffId === "snapFreeze") {
+    L.snapFreezeTier = (L.snapFreezeTier || 0) + 1;
+  } else if (buffId === "lastStand") {
+    L.lastStandTier = (L.lastStandTier || 0) + 1;
+    L.lastStandUsedRound = false;
   } else {
     return { ok: false, reason: "invalid" };
   }
