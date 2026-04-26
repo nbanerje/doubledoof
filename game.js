@@ -246,7 +246,8 @@ function drawHudOnView() {
 }
 
 const arcadeExtraEl = document.getElementById("arcadeExtra");
-const FLOOR_Y = 560;
+const FLOOR_Y = 520;
+const PLATFORM_RAISE_PX = 40;
 /** Axis-aligned body: `p.x` left, `p.y` top; feet sit on `plat.y` / `FLOOR_Y`. Matches draw anchor (feet ≈ translateY + 37). */
 const PLAYER_BODY_W = 36;
 const PLAYER_BODY_H = 48;
@@ -290,18 +291,38 @@ const BUFF_POOL = [
   "fireBreath",
   "freeze",
   "groundPound",
+  "poisonSword",
+  "teleport",
+  "vampSlash",
+  "heavyLanding",
+  "secondWind",
+  "ricochetOrb",
+  "trapSeed",
+  "echoSlash",
 ];
 const BUFF_DEFS = {
-  triple: { name: "Triple shot", desc: "Each charged release fires 3 orbs" },
-  tank: { name: "Tank", desc: "+30 max HP for the match" },
-  power: { name: "Power", desc: "+35% damage for the match" },
-  infiniteJumps: { name: "Sky", desc: "Unlimited mid-air jumps" },
-  infiniteAmmo: { name: "Bottomless", desc: "Infinite orb ammo" },
-  instantMaxCharge: { name: "Overcharge", desc: "Shots are always full tier V" },
-  meleeLong: { name: "Duelist", desc: "Melee range and swing 2× longer" },
-  fireBreath: { name: "Fire Breath", desc: "Hold a mapped key to breathe scaling fire" },
-  freeze: { name: "Freeze", desc: "Orbs root enemies on hit and fire a trailing orb" },
-  groundPound: { name: "Ground Pound", desc: "Map a key to slam: same ground layer launches + 25% damage" },
+  triple: { name: "Triple shot", desc: "Each charged release fires 3 orbs", icon: "🔺" },
+  tank: { name: "Tank", desc: "+75 max HP for the match", icon: "🛡️" },
+  power: { name: "Power", desc: "+35% damage for the match", icon: "⚡" },
+  infiniteJumps: { name: "Sky", desc: "Unlimited mid-air jumps", icon: "🪽" },
+  infiniteAmmo: { name: "Bottomless", desc: "Infinite orb ammo", icon: "♾️" },
+  instantMaxCharge: { name: "Overcharge", desc: "Shots are always full tier V", icon: "💥" },
+  meleeLong: { name: "Duelist", desc: "Melee range and swing 2× longer", icon: "🗡️" },
+  fireBreath: {
+    name: "Fire Breath",
+    desc: "Hold to breathe fire; release shoots a bolt (10 dmg + 5s burn)",
+    icon: "🐉",
+  },
+  freeze: { name: "Freeze", desc: "Orbs root enemies on hit and fire a trailing orb", icon: "❄️" },
+  groundPound: { name: "Ground Pound", desc: "Map a key to slam: same ground layer launches + 25% damage", icon: "🪨" },
+  poisonSword: { name: "Poison Sword", desc: "Melee/staff hits poison for 5s: green flash + damage over time", icon: "☠️" },
+  teleport: { name: "Teleport", desc: "Map a key to teleport to your opponent once per round", icon: "🌀" },
+  vampSlash: { name: "Vamp Slash", desc: "Heal for 30% of melee damage dealt (stacks)", icon: "🩸" },
+  heavyLanding: { name: "Heavy Landing", desc: "Landing near enemies deals burst damage + pop-up", icon: "🦶" },
+  secondWind: { name: "Second Wind", desc: "Below 35% HP: move faster and deal bonus damage", icon: "💨" },
+  ricochetOrb: { name: "Ricochet Orb", desc: "Orbs bounce once off walls/platforms (stacks)", icon: "🪃" },
+  trapSeed: { name: "Trap Seed", desc: "Melee plants a seed spot; stepping in poisons for 10s (2 dmg/sec)", icon: "🌱" },
+  echoSlash: { name: "Echo Slash", desc: "Melee hits add bonus echo damage (stacks)", icon: "👻" },
 };
 
 function shuffleInPlace(a) {
@@ -317,24 +338,27 @@ function shuffleInPlace(a) {
 /** `triple` is always one of the three. Everything else: weight 1; Bottomless (infinite ammo) is rarer. */
 const BUFF_POOL_NO_TRIPLE = BUFF_POOL.filter((id) => id !== "triple");
 const BUFF_INFINITE_AMMO_RARITY = 0.12;
-function buffPickWeight(id) {
+/** Extra weight for Fire Breath when the loser plays Dragon (still competes with other buffs). */
+const BUFF_DRAGON_FIRE_BREATH_PICK_WEIGHT = 8;
+function buffPickWeight(id, opts = {}) {
   if (id === "infiniteAmmo") return BUFF_INFINITE_AMMO_RARITY;
+  if (opts.dragonLoser && id === "fireBreath") return BUFF_DRAGON_FIRE_BREATH_PICK_WEIGHT;
   return 1;
 }
 
 /**
  * Picks 2 distinct buffs from `ids` without replacement, favoring rarer `infiniteAmmo` less often.
  */
-function pickWeightedPairWithoutReplacement(ids) {
+function pickWeightedPairWithoutReplacement(ids, weightOpts = {}) {
   if (ids.length < 2) {
     return ids.length === 1 ? [ids[0], ids[0]] : ["tank", "power"];
   }
   let wSum = 0;
-  for (const id of ids) wSum += buffPickWeight(id);
+  for (const id of ids) wSum += buffPickWeight(id, weightOpts);
   let r = Math.random() * wSum;
   let first = ids[ids.length - 1];
   for (const id of ids) {
-    r -= buffPickWeight(id);
+    r -= buffPickWeight(id, weightOpts);
     if (r <= 0) {
       first = id;
       break;
@@ -342,11 +366,11 @@ function pickWeightedPairWithoutReplacement(ids) {
   }
   const rest = ids.filter((id) => id !== first);
   wSum = 0;
-  for (const id of rest) wSum += buffPickWeight(id);
+  for (const id of rest) wSum += buffPickWeight(id, weightOpts);
   r = Math.random() * wSum;
   let second = rest[rest.length - 1];
   for (const id of rest) {
-    r -= buffPickWeight(id);
+    r -= buffPickWeight(id, weightOpts);
     if (r <= 0) {
       second = id;
       break;
@@ -359,9 +383,10 @@ function pickWeightedPairWithoutReplacement(ids) {
  * Picks 3 cards: always includes **triple**; the other 2 are weighted (Bottomless is rare).
  * Order is shuffled so the triple card moves between A / W / D. Same-set avoidance vs last intermission.
  */
-function pickRandomBuffTriplet() {
+function pickRandomBuffTriplet(loserIdx) {
+  const weightOpts = { dragonLoser: loserIdx != null && isDragonCharacterForPlayer(loserIdx) };
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    const [x, y] = pickWeightedPairWithoutReplacement([...BUFF_POOL_NO_TRIPLE]);
+    const [x, y] = pickWeightedPairWithoutReplacement([...BUFF_POOL_NO_TRIPLE], weightOpts);
     const triplet = ["triple", x, y];
     shuffleInPlace(triplet);
     const key = [...triplet].sort().join("|");
@@ -369,7 +394,7 @@ function pickRandomBuffTriplet() {
       return { triplet, key };
     }
   }
-  const [x, y] = pickWeightedPairWithoutReplacement([...BUFF_POOL_NO_TRIPLE]);
+  const [x, y] = pickWeightedPairWithoutReplacement([...BUFF_POOL_NO_TRIPLE], weightOpts);
   const triplet = ["triple", x, y];
   shuffleInPlace(triplet);
   return { triplet, key: [...triplet].sort().join("|") };
@@ -389,9 +414,13 @@ const FIRE_BREATH_H = 20;
 const FIRE_BREATH_TICK_MS = 100;
 const FIRE_BREATH_FRAME_COUNT = 26;
 const FIRE_BREATH_FRAME_MS = 24;
-const FIRE_BREATH_BASE_DAMAGE = 3;
+const FIRE_BREATH_BASE_DAMAGE = 7;
 const FIRE_BREATH_SLOW_MULT = 0.25;
-const FIRE_BREATH_GROWTH_PER_TICK = 0.03;
+const FIRE_BREATH_GROWTH_PER_TICK = 0.12;
+/** Caps range/height growth while holding (uncapped was ~7× at max hold). */
+const FIRE_BREATH_MAX_SCALE = 2.5;
+const FIRE_BREATH_MAX_HOLD_MS = 5000;
+const FIRE_BREATH_COOLDOWN_MS = 5000;
 const GROUND_POUND_DAMAGE_FRACTION = 0.25;
 const GROUND_POUND_LAUNCH_VY = -14;
 const GROUND_POUND_LAYER_EPSILON = 2;
@@ -399,10 +428,23 @@ const GROUND_POUND_SHAKE_MS = 240;
 const GROUND_POUND_SHAKE_AMPLITUDE = 7;
 const GROUND_POUND_FREEZE_MS = 3000;
 const FROZEN_VIBRATE_PX = 2;
+const POISON_DURATION_MS = 5000;
+const POISON_TICK_MS = 1000;
+const POISON_TICK_DAMAGE = 2;
+/** Fire-breath release: fast bolt + burn on hit */
+const BURN_DURATION_MS = 5000;
+const BURN_TICK_MS = 300;
+const BURN_TICK_DAMAGE = 0.5;
+const FIRE_BURST_SPEED = 22;
+const FIRE_BURST_W = 32;
+const FIRE_BURST_H = 12;
+const FIRE_BURST_HIT_DAMAGE = 10;
+const FIRE_BURST_FRAME_MS = 70;
 const DEFAULT_MAX_HP = 100;
-const TANK_BUFF_MAX_HP = 130;
+/** Max HP gained per Tank card pick (stacks if picked again). */
+const TANK_BUFF_HP_PER_PICK = 75;
 /** A match ends as soon as one side reaches this many round wins. */
-const WINS_TO_END_MATCH = 5;
+const WINS_TO_END_MATCH = 10;
 /** Charged orb damage = `ORB_DAMAGE_MIN + ORB_DAMAGE_RANGE * chargeCurve` (before power buff). */
 const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
@@ -411,8 +453,27 @@ const ORB_AMMO_PER_ROUND = 10;
 const AMMO_RELOAD_IDLE_MS = 5000;
 const AMMO_RELOAD_AMOUNT = 5;
 const POWER_BUFF_DAMAGE_MULT = 1.35;
+const CARD_LOADOUT_MAX = 5;
 const FREEZE_HIT_ROOT_MS = 1600;
 const FREEZE_TRAIL_ORB_OFFSET = 26;
+const VAMP_SLASH_HEAL_FRAC = 0.3;
+const VAMP_SLASH_STACK_BONUS = 0.1;
+const HEAVY_LANDING_RANGE = 96;
+const HEAVY_LANDING_DAMAGE = 8;
+const HEAVY_LANDING_STACK_BONUS = 4;
+const HEAVY_LANDING_UPWARD_VY = -8;
+const SECOND_WIND_HP_THRESHOLD = 0.35;
+const SECOND_WIND_SPEED_BONUS = 0.25;
+const SECOND_WIND_DAMAGE_BONUS = 0.2;
+const SECOND_WIND_STACK_BONUS = 0.1;
+const TRAP_SEED_POISON_DURATION_MS = 10000;
+const TRAP_SEED_POISON_TICK_MS = 1000;
+const TRAP_SEED_POISON_TICK_DAMAGE = 2;
+const TRAP_SEED_SPOT_W = 22;
+const TRAP_SEED_SPOT_H = 8;
+const TRAP_SEED_SPOT_DURATION_MS = 10000;
+const ECHO_SLASH_BONUS_FRAC = 0.5;
+const ECHO_SLASH_STACK_BONUS_FRAC = 0.15;
 const BINDINGS_STORAGE_KEY = "bat-duel-bindings-v1";
 
 const PERCIVAL_IDLE_URL = "./assets/percival-idle.png";
@@ -438,6 +499,12 @@ const DRAGON_RUN_URLS = [
   "./assets/dragon-run-3.png?v=4",
   "./assets/dragon-run-4.png?v=4",
 ];
+const FUNUS_IDLE_URL = "./assets/funus_idle_1.png";
+const FUNUS_RUN_URLS = [
+  "./assets/funus_run_1.png",
+  "./assets/funus_run_2.png",
+  "./assets/funus_run_3.png",
+];
 const STAFF_SLAP_URLS = [
   "./assets/staff-slap-1.png",
   "./assets/staff-slap-2.png",
@@ -448,18 +515,35 @@ const STAFF_SLAP_URLS = [
 const MELEE_SWORD_URL = "./assets/melee-sword.png";
 const FIRE_BREATH_RIGHT_URL = "./assets/fire-breath-right-sheet.png";
 const FIRE_BREATH_LEFT_URL = "./assets/fire-breath-left-sheet.png";
+const CASTLE_PLATFORM_BG_URL = "./assets/castle-platform-bg.png";
+const WATERFALL_BG_URL = "./assets/bg-waterfall.png";
+const FOREST_BG_URL = "./assets/bg-forest.png";
+const CASTLE_WIDE_BG_URL = "./assets/bg-castle-2.png";
+const FIRE_BURST_FRAME_URLS = [
+  "./assets/fire-burst-1.png",
+  "./assets/fire-burst-2.png",
+  "./assets/fire-burst-3.png",
+  "./assets/fire-burst-4.png",
+];
 const percivalIdleImage = new Image();
 const meleeSwordImage = new Image();
 const fireBreathRightImage = new Image();
 const fireBreathLeftImage = new Image();
+const castlePlatformBgImage = new Image();
+const waterfallBgImage = new Image();
+const forestBgImage = new Image();
+const castleWideBgImage = new Image();
 const percivalHitImage = new Image();
 const guy2IdleImage = new Image();
 const guy2HitImage = new Image();
 const dragonIdleImage = new Image();
+const funusIdleImage = new Image();
 const percivalRunImages = PERCIVAL_RUN_URLS.map(() => new Image());
 const guy2RunImages = GUY2_RUN_URLS.map(() => new Image());
 const dragonRunImages = DRAGON_RUN_URLS.map(() => new Image());
+const funusRunImages = FUNUS_RUN_URLS.map(() => new Image());
 const staffSlapImages = STAFF_SLAP_URLS.map(() => new Image());
+const fireBurstFrameImages = FIRE_BURST_FRAME_URLS.map(() => new Image());
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let percivalIdleBlit = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
@@ -470,6 +554,8 @@ let guy2IdleBlit = null;
 let guy2HitBlit = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let dragonIdleBlit = null;
+/** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
+let funusIdleBlit = null;
 /**
  * Four run blits in order: 1 → 2 → 3 → 4 → loop (each file is keyed + cropped to the knight).
  * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
@@ -484,11 +570,21 @@ let guy2Run = null;
  */
 let dragonRun = null;
 /**
+ * Three run blits in order: 1 → 2 → 3 → loop.
+ * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
+ */
+let funusRun = null;
+/**
  * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
  */
 let staffSlap = null;
 /** @type {{ canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number } | null} */
 let meleeSwordBlit = null;
+/**
+ * Four burst frames in order: 1 -> 2 -> 3 -> 4 -> loop.
+ * @type {{ frames: { canvas: HTMLCanvasElement; cx: number; cy: number; cw: number; ch: number }[] } | null}
+ */
+let fireBurstAnim = null;
 
 function globalAlphaBbox(d, iw, ih) {
   let minX = iw;
@@ -624,6 +720,21 @@ function buildStaffSlapBlit(img) {
   };
 }
 
+function buildFireBurstFrameBlit(img) {
+  const k = keyPercivalToCanvas(img);
+  if (!k) return null;
+  const { canvas, d, iw, ih } = k;
+  const bb = globalAlphaBbox(d, iw, ih);
+  if (!bb) return null;
+  return {
+    canvas,
+    cx: bb.minX,
+    cy: bb.minY,
+    cw: bb.maxX - bb.minX + 1,
+    ch: bb.maxY - bb.minY + 1,
+  };
+}
+
 function initPercivalIdleBlit() {
   if (!percivalIdleImage.naturalWidth) return;
   percivalIdleBlit = buildPercivalIdleBlit(percivalIdleImage);
@@ -664,6 +775,14 @@ dragonIdleImage.onload = initDragonIdleBlit;
 dragonIdleImage.src = DRAGON_IDLE_URL;
 if (dragonIdleImage.complete) initDragonIdleBlit();
 
+function initFunusIdleBlit() {
+  if (!funusIdleImage.naturalWidth) return;
+  funusIdleBlit = buildPercivalIdleBlit(funusIdleImage);
+}
+funusIdleImage.onload = initFunusIdleBlit;
+funusIdleImage.src = FUNUS_IDLE_URL;
+if (funusIdleImage.complete) initFunusIdleBlit();
+
 function initMeleeSwordBlit() {
   if (!meleeSwordImage.naturalWidth) return;
   meleeSwordBlit = buildPercivalIdleBlit(meleeSwordImage);
@@ -674,6 +793,29 @@ if (meleeSwordImage.complete) initMeleeSwordBlit();
 
 fireBreathRightImage.src = FIRE_BREATH_RIGHT_URL;
 fireBreathLeftImage.src = FIRE_BREATH_LEFT_URL;
+castlePlatformBgImage.src = CASTLE_PLATFORM_BG_URL;
+waterfallBgImage.src = WATERFALL_BG_URL;
+forestBgImage.src = FOREST_BG_URL;
+castleWideBgImage.src = CASTLE_WIDE_BG_URL;
+
+function tryInitFireBurstFrames() {
+  for (let i = 0; i < fireBurstFrameImages.length; i += 1) {
+    const im = fireBurstFrameImages[i];
+    if (!im.complete || !im.naturalWidth) return;
+  }
+  const frames = [];
+  for (let i = 0; i < fireBurstFrameImages.length; i += 1) {
+    const b = buildFireBurstFrameBlit(fireBurstFrameImages[i]);
+    if (!b) return;
+    frames.push(b);
+  }
+  fireBurstAnim = { frames };
+}
+for (let i = 0; i < fireBurstFrameImages.length; i += 1) {
+  fireBurstFrameImages[i].onload = tryInitFireBurstFrames;
+  fireBurstFrameImages[i].src = FIRE_BURST_FRAME_URLS[i];
+  if (fireBurstFrameImages[i].complete) tryInitFireBurstFrames();
+}
 
 function tryInitGuy2Run() {
   for (let i = 0; i < guy2RunImages.length; i += 1) {
@@ -732,6 +874,25 @@ for (let i = 0; i < dragonRunImages.length; i += 1) {
   if (dragonRunImages[i].complete) tryInitDragonRun();
 }
 
+function tryInitFunusRun() {
+  for (let i = 0; i < funusRunImages.length; i += 1) {
+    const im = funusRunImages[i];
+    if (!im.complete || !im.naturalWidth) return;
+  }
+  const frames = [];
+  for (let i = 0; i < funusRunImages.length; i += 1) {
+    const b = buildPercivalIdleBlit(funusRunImages[i]);
+    if (!b) return;
+    frames.push(b);
+  }
+  funusRun = { frames };
+}
+for (let i = 0; i < funusRunImages.length; i += 1) {
+  funusRunImages[i].onload = tryInitFunusRun;
+  funusRunImages[i].src = FUNUS_RUN_URLS[i];
+  if (funusRunImages[i].complete) tryInitFunusRun();
+}
+
 function tryInitStaffSlap() {
   for (let i = 0; i < staffSlapImages.length; i += 1) {
     const im = staffSlapImages[i];
@@ -762,6 +923,7 @@ function defaultKeyBindings() {
       attack: "KeyS",
       fire: "",
       groundPound: "",
+      teleport: "",
     },
     p1: {
       left: "ArrowLeft",
@@ -772,6 +934,7 @@ function defaultKeyBindings() {
       attack: "ArrowDown",
       fire: "",
       groundPound: "",
+      teleport: "",
     },
     online: {
       left: "KeyA",
@@ -781,6 +944,7 @@ function defaultKeyBindings() {
       orb: "KeyS",
       fire: "",
       groundPound: "",
+      teleport: "",
     },
   };
 }
@@ -803,14 +967,17 @@ function loadKeyBindings() {
     if (!keyBindings.p1.charge) keyBindings.p1.charge = def.p1.charge;
     if (keyBindings.p0.fire == null) keyBindings.p0.fire = def.p0.fire;
     if (keyBindings.p0.groundPound == null) keyBindings.p0.groundPound = def.p0.groundPound;
+    if (keyBindings.p0.teleport == null) keyBindings.p0.teleport = def.p0.teleport;
     if (keyBindings.p1.fire == null) keyBindings.p1.fire = def.p1.fire;
     if (keyBindings.p1.groundPound == null) keyBindings.p1.groundPound = def.p1.groundPound;
+    if (keyBindings.p1.teleport == null) keyBindings.p1.teleport = def.p1.teleport;
     keyBindings.p0.attack = keyBindings.p0.charge;
     keyBindings.p1.attack = keyBindings.p1.charge;
     if (!keyBindings.online.melee) keyBindings.online.melee = def.online.melee;
     if (!keyBindings.online.orb) keyBindings.online.orb = keyBindings.online.attack || def.online.orb;
     if (keyBindings.online.fire == null) keyBindings.online.fire = def.online.fire;
     if (keyBindings.online.groundPound == null) keyBindings.online.groundPound = def.online.groundPound;
+    if (keyBindings.online.teleport == null) keyBindings.online.teleport = def.online.teleport;
   } catch (_) {
     /* ignore */
   }
@@ -838,6 +1005,7 @@ function bindingCodesFlat() {
   add(p0.attack);
   add(p0.fire);
   add(p0.groundPound);
+  add(p0.teleport);
   add(p1.left);
   add(p1.right);
   add(p1.jump);
@@ -846,6 +1014,7 @@ function bindingCodesFlat() {
   add(p1.attack);
   add(p1.fire);
   add(p1.groundPound);
+  add(p1.teleport);
   add(online.left);
   add(online.right);
   add(online.jump);
@@ -853,6 +1022,7 @@ function bindingCodesFlat() {
   add(online.orb);
   add(online.fire);
   add(online.groundPound);
+  add(online.teleport);
   return s;
 }
 
@@ -1158,7 +1328,7 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
   stepLabelEl.textContent = isCharacter ? "Pick character" : "Pick weapon";
   arcadeTitleEl.textContent = isCharacter ? "Pick Character" : "Pick Weapon";
   arcadeTextEl.textContent = isCharacter
-    ? `${label}: choose from 6 character slots. Knight and Dragon are available right now.`
+    ? `${label}: choose from 6 character slots. Knight, Dragon, and Funus are available right now.`
     : `${label}: choose from 6 weapon slots. Sword and Staff are available right now.`;
   arcadeActionsEl.innerHTML = "";
   arcadeActionsEl.classList.add("arcade-actions--char-pick");
@@ -1181,6 +1351,8 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
       ? isCharacter
         ? opt.id === "dragon"
           ? "D"
+          : opt.id === "funus"
+            ? "F"
           : "K"
         : opt.id === "staff"
           ? "T"
@@ -1255,9 +1427,37 @@ function weaponStatsForId(id) {
 }
 
 function onlineInputPayload(action, controls) {
-  const payload = { controls, weapon: selectedOnlineLoadout.weapon || "sword" };
+  const payload = {
+    controls,
+    weapon: selectedOnlineLoadout.weapon || "sword",
+    character: selectedOnlineLoadout.character || "knight",
+  };
   if (action) payload.action = action;
   return payload;
+}
+
+function isDragonCharacterForPlayer(idx, p = null) {
+  if (p?.character) return p.character === "dragon";
+  if (mode === "online") {
+    if (idx === playerIndex) return (selectedOnlineLoadout.character || "knight") === "dragon";
+    return (localState.players[idx]?.character || "knight") === "dragon";
+  }
+  return (selectedLoadouts[idx]?.character || "knight") === "dragon";
+}
+
+function sanitizeBuffTripletForPlayer(triplet, loserIdx) {
+  if (!Array.isArray(triplet)) return triplet;
+  if (isDragonCharacterForPlayer(loserIdx)) return [...triplet];
+  const out = [...triplet];
+  const fallbackPool = BUFF_POOL.filter((id) => id !== "fireBreath");
+  for (let i = 0; i < out.length; i += 1) {
+    if (out[i] !== "fireBreath") continue;
+    const used = new Set(out);
+    used.delete("fireBreath");
+    const choices = fallbackPool.filter((id) => !used.has(id));
+    out[i] = choices.length ? choices[Math.floor(Math.random() * choices.length)] : "tank";
+  }
+  return out;
 }
 
 /** Distinct level layouts; `getLevelForRound` cycles (first-to-5 match length is independent). */
@@ -1362,6 +1562,50 @@ const LEVELS = [
     ],
   },
   {
+    name: "Castle Gate",
+    bg: "castle",
+    ground: "#495867",
+    platforms: [
+      { x: 140, y: 500, w: 175, h: 14 },
+      { x: 400, y: 395, w: 200, h: 14 },
+      { x: 700, y: 505, w: 170, h: 14 },
+      { x: 560, y: 335, w: 155, h: 14 },
+    ],
+  },
+  {
+    name: "Waterfall Ruins",
+    bg: "waterfall",
+    ground: "#5c8a6a",
+    platforms: [
+      { x: 140, y: 500, w: 175, h: 14 },
+      { x: 400, y: 395, w: 200, h: 14 },
+      { x: 700, y: 505, w: 170, h: 14 },
+      { x: 560, y: 335, w: 155, h: 14 },
+    ],
+  },
+  {
+    name: "Deepwood Reach",
+    bg: "forest",
+    ground: "#2c6c5f",
+    platforms: [
+      { x: 140, y: 500, w: 175, h: 14 },
+      { x: 400, y: 395, w: 200, h: 14 },
+      { x: 700, y: 505, w: 170, h: 14 },
+      { x: 560, y: 335, w: 155, h: 14 },
+    ],
+  },
+  {
+    name: "High Keep",
+    bg: "castleWide",
+    ground: "#6f7a88",
+    platforms: [
+      { x: 140, y: 500, w: 175, h: 14 },
+      { x: 400, y: 395, w: 200, h: 14 },
+      { x: 700, y: 505, w: 170, h: 14 },
+      { x: 560, y: 335, w: 155, h: 14 },
+    ],
+  },
+  {
     name: "Clear Skies Arena",
     bg: "sunny",
     ground: "#509068",
@@ -1389,8 +1633,25 @@ function currentLevel() {
   return getLevelForRound(localState.round);
 }
 
+function platformsForRound(basePlatforms, round) {
+  if (!Array.isArray(basePlatforms) || basePlatforms.length <= 1) return basePlatforms || [];
+  const count = basePlatforms.length;
+  const shift = ((Math.max(1, round) - 1) % count + count) % count;
+  if (shift === 0) return basePlatforms;
+  const out = [];
+  for (let i = 0; i < count; i += 1) {
+    const size = basePlatforms[i];
+    const slot = basePlatforms[(i + shift) % count];
+    out.push({ x: slot.x, y: slot.y, w: size.w, h: size.h });
+  }
+  return out;
+}
+
 function currentPlatforms() {
-  return currentLevel().platforms;
+  return platformsForRound(currentLevel().platforms, localState.round).map((plat) => ({
+    ...plat,
+    y: plat.y - PLATFORM_RAISE_PX,
+  }));
 }
 
 let mode = "single";
@@ -1411,7 +1672,7 @@ let myLobbyUserId = "";
 const CHARACTER_OPTIONS = [
   { id: "knight", label: "Knight", enabled: true },
   { id: "dragon", label: "Dragon", enabled: true },
-  { id: "locked-2", label: "Coming soon", enabled: false },
+  { id: "funus", label: "Funus", enabled: true },
   { id: "locked-3", label: "Coming soon", enabled: false },
   { id: "locked-4", label: "Coming soon", enabled: false },
   { id: "locked-5", label: "Coming soon", enabled: false },
@@ -1511,6 +1772,7 @@ let localState = {
       jumpsUsed: 0,
       onGround: true,
       chargeStartAt: 0,
+      cardLoadout: [],
     },
     {
       x: 760,
@@ -1526,6 +1788,7 @@ let localState = {
       jumpsUsed: 0,
       onGround: true,
       chargeStartAt: 0,
+      cardLoadout: [],
     },
   ],
   projectiles: [],
@@ -1929,6 +2192,8 @@ function drawPlayer(p) {
   const recoil = now < v.recoilUntil ? 1 : 0;
   const attackPose = now < v.attackUntil ? 1 : 0;
   const frozen = (p.freezeRootUntil || 0) > now;
+  const poisoned = (p.poisonUntil || 0) > now;
+  const burning = (p.burnUntil || 0) > now;
   const freezeVibeX = frozen ? Math.round(Math.sin(now * 0.12) * FROZEN_VIBRATE_PX) : 0;
   const freezeVibeY = frozen ? Math.round(Math.cos(now * 0.17) * (FROZEN_VIBRATE_PX * 0.5)) : 0;
 
@@ -1970,6 +2235,41 @@ function drawPlayer(p) {
     }
     ctx.translate(footX, footY);
     ctx.scale(dragonFacing, 1);
+    ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -dw / 2, -dh, dw, dh);
+    ctx.restore();
+  } else if (characterId === "funus" && funusIdleBlit) {
+    const runDir = dragonRunInputDirection(idx, p, v);
+    const movingH = runDir !== 0;
+    const funusFacing = movingH ? runDir : p.facing || 1;
+    if (movingH && !v.dragonWasRunning) {
+      v.dragonRunStartedAt = performance.now();
+    } else if (!movingH) {
+      v.dragonRunStartedAt = 0;
+    }
+    v.dragonWasRunning = movingH;
+    const useRun = funusRun != null && funusRun.frames.length >= 3 && movingH;
+    const bl = useRun
+      ? (() => {
+          const f = funusRun.frames;
+          const elapsed = performance.now() - (v.dragonRunStartedAt || performance.now());
+          const fi = Math.floor(elapsed * 0.012) % f.length;
+          const fr = f[fi];
+          return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
+        })()
+      : funusIdleBlit;
+    const s = Math.min((PLAYER_BODY_W * 1.02) / bl.cw, (PLAYER_BODY_H * 1.02) / bl.ch);
+    const dw = bl.cw * s;
+    const dh = bl.ch * s;
+    const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1) + freezeVibeX;
+    const footY = baseY + PLAYER_BODY_H + freezeVibeY;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    if (recoil) {
+      ctx.fillStyle = "rgba(255, 60, 60, 0.22)";
+      ctx.fillRect(p.x + freezeVibeX, baseY + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
+    }
+    ctx.translate(footX, footY);
+    ctx.scale(funusFacing, 1);
     ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -dw / 2, -dh, dw, dh);
     ctx.restore();
   } else if (idx === 0 && percivalIdleBlit) {
@@ -2050,6 +2350,26 @@ function drawPlayer(p) {
       ctx.fillStyle = "rgba(255,60,60,0.35)";
       ctx.fillRect(px + freezeVibeX, py + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
     }
+    ctx.restore();
+  }
+
+  if (poisoned) {
+    const pulse = 0.16 + 0.16 * (0.5 + 0.5 * Math.sin(now * 0.03));
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = `rgba(56, 214, 92, ${pulse.toFixed(3)})`;
+    ctx.fillRect(px + freezeVibeX, py + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
+    ctx.restore();
+  }
+  if (burning) {
+    const pulse = 0.22 + 0.28 * (0.5 + 0.5 * Math.sin(now * 0.045));
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = `rgba(255, 55, 40, ${pulse.toFixed(3)})`;
+    ctx.fillRect(px + freezeVibeX, py + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
+    ctx.fillStyle = `rgba(255, 160, 60, ${(pulse * 0.55).toFixed(3)})`;
+    ctx.fillRect(px + freezeVibeX, py + freezeVibeY + 4, PLAYER_BODY_W, Math.max(8, PLAYER_BODY_H - 8));
     ctx.restore();
   }
 
@@ -2169,6 +2489,53 @@ function drawChargeOrb(p, playerIdx) {
 }
 
 function drawProjectile(s) {
+  if (s.trapSeedSpot) {
+    const x = Math.floor(s.x);
+    const y = Math.floor(s.y);
+    const w = Math.max(6, Math.ceil(s.w || TRAP_SEED_SPOT_W));
+    const h = Math.max(4, Math.ceil(s.h || TRAP_SEED_SPOT_H));
+    const pulse = 0.75 + 0.25 * Math.sin(performance.now() * 0.012);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = `rgba(72, 190, 95, ${0.45 * pulse})`;
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = "#38a757";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = "#9df6af";
+    ctx.fillRect(x + 2, y + 2, Math.max(2, w - 4), 2);
+    ctx.restore();
+    return;
+  }
+  if (s.fireBurst) {
+    const x = Math.floor(s.x);
+    const y = Math.floor(s.y);
+    const w = Math.max(4, Math.ceil(s.w));
+    const h = Math.max(4, Math.ceil(s.h));
+    const spawnedAt = s.spawnedAt || Date.now();
+    if (fireBurstAnim?.frames?.length) {
+      const fi = Math.floor((Date.now() - spawnedAt) / FIRE_BURST_FRAME_MS) % fireBurstAnim.frames.length;
+      const fr = fireBurstAnim.frames[fi];
+      const dw = Math.max(8, Math.round(w * 2.2));
+      const dh = Math.max(10, Math.round(h * 3.8));
+      const dx = x + (w - dw) / 2;
+      const dy = y + (h - dh) / 2;
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.drawImage(fr.canvas, fr.cx, fr.cy, fr.cw, fr.ch, Math.floor(dx), Math.floor(dy), dw, dh);
+      ctx.restore();
+      return;
+    }
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "rgba(255, 220, 80, 0.9)";
+    ctx.fillRect(x - 2, y - 1, w + 4, h + 2);
+    ctx.fillStyle = "rgba(255, 90, 30, 0.95)";
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+    return;
+  }
   const tier = chargeTierFromDamage(s.damage);
   const t = clamp((s.damage - ORB_DAMAGE_MIN) / ORB_DAMAGE_RANGE, 0, 1);
   const x = Math.floor(s.x);
@@ -2257,7 +2624,7 @@ function applyTouchInput() {
       doMelee(0);
     }
     if (touchState.orb && !touchState.prevOrb && !visualState[0].charging) {
-      if (Date.now() >= roundLockUntil) {
+      if (Date.now() >= roundLockUntil && !playerInEnemyFire(0)) {
         const p0 = localState.players[0];
         const a0 = p0.orbAmmo != null ? p0.orbAmmo : ORB_AMMO_PER_ROUND;
         if (p0.infiniteAmmo || a0 > 0) {
@@ -2281,10 +2648,10 @@ function applyTouchInput() {
     if (touchState.left !== touchState.prevLeft || touchState.right !== touchState.prevRight) {
       socket.emit("match:input", onlineInputPayload(null, controls));
     }
-    if (touchState.attack && !touchState.prevAttack && !onlineIntermissionActive()) {
+    if (touchState.attack && !touchState.prevAttack && !onlineIntermissionActive() && !playerInEnemyFire(playerIndex)) {
       if (triggerSwing(playerIndex)) socket.emit("match:input", onlineInputPayload("melee", controls));
     }
-    if (touchState.orb && !touchState.prevOrb && !onlineIntermissionActive()) {
+    if (touchState.orb && !touchState.prevOrb && !onlineIntermissionActive() && !playerInEnemyFire(playerIndex)) {
       visualState[playerIndex].charging = true;
       visualState[playerIndex].chargeKeyDownAt = Date.now();
       socket.emit("match:input", onlineInputPayload("chargeStart", controls));
@@ -2294,7 +2661,7 @@ function applyTouchInput() {
       triggerSwing(playerIndex);
       socket.emit("match:input", onlineInputPayload("chargeRelease", controls));
     }
-    if (touchState.fire && !touchState.prevFire && !onlineIntermissionActive()) {
+    if (touchState.fire && !touchState.prevFire && !onlineIntermissionActive() && !playerInEnemyFire(playerIndex)) {
       socket.emit("match:input", onlineInputPayload("fireStart", controls));
     }
     if (!touchState.fire && touchState.prevFire) {
@@ -2339,8 +2706,30 @@ function drawArenaBackground() {
   const level = currentLevel();
   const theme = level.bg;
   const w = VIEW_W;
+  const drawCoverBg = (img, tint = "rgba(8, 12, 20, 0.2)") => {
+    if (!img.complete || !img.naturalWidth) return false;
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    const scale = Math.max(w / iw, FLOOR_Y / ih);
+    const dw = Math.ceil(iw * scale);
+    const dh = Math.ceil(ih * scale);
+    const dx = Math.floor((w - dw) / 2);
+    const dy = Math.floor((FLOOR_Y - dh) / 2);
+    ctx.drawImage(img, dx, dy, dw, dh);
+    ctx.fillStyle = tint;
+    ctx.fillRect(0, 0, w, FLOOR_Y);
+    return true;
+  };
 
-  if (theme === "sunny") {
+  if (theme === "castle" && drawCoverBg(castlePlatformBgImage, "rgba(8, 12, 20, 0.22)")) {
+    // Rendered from imported image.
+  } else if (theme === "waterfall" && drawCoverBg(waterfallBgImage, "rgba(6, 16, 22, 0.16)")) {
+    // Rendered from imported image.
+  } else if (theme === "forest" && drawCoverBg(forestBgImage, "rgba(8, 20, 16, 0.22)")) {
+    // Rendered from imported image.
+  } else if (theme === "castleWide" && drawCoverBg(castleWideBgImage, "rgba(10, 14, 20, 0.2)")) {
+    // Rendered from imported image.
+  } else if (theme === "sunny") {
     fillPixelSkyBands(0, FLOOR_Y, ["#5ab8f0", "#7ecfff", "#b8ecff", "#ffe6a8", "#ffc860"]);
     const sunX = Math.floor(w * 0.76);
     const sunY = 88;
@@ -2451,7 +2840,8 @@ function fireBreathRectForPlayer(p) {
   const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
   const fac = p.facing || 1;
   const heldMs = Math.max(0, Date.now() - (p.fireStartAt || Date.now()));
-  const scale = 1 + Math.floor(heldMs / FIRE_BREATH_TICK_MS) * FIRE_BREATH_GROWTH_PER_TICK;
+  const rawScale = 1 + Math.floor(heldMs / FIRE_BREATH_TICK_MS) * FIRE_BREATH_GROWTH_PER_TICK;
+  const scale = Math.min(rawScale, FIRE_BREATH_MAX_SCALE);
   const range = FIRE_BREATH_RANGE * scale;
   const height = FIRE_BREATH_H * scale;
   const x = fac > 0 ? p.x + PLAYER_BODY_W : p.x - range;
@@ -2484,7 +2874,22 @@ function drawFireBreath(p) {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.globalCompositeOperation = "lighter";
-  if (img.complete && img.naturalWidth) {
+  if (fireBurstAnim?.frames?.length) {
+    const fi = Math.floor(held / FIRE_BURST_FRAME_MS) % fireBurstAnim.frames.length;
+    const fr = fireBurstAnim.frames[fi];
+    const flameW = Math.max(14, Math.round(r.w * 0.88));
+    const flameH = Math.max(18, Math.round(r.h * 2.1 * pulse));
+    const jitter = Math.sin(held * 0.026) * 2;
+    const x = p.facing >= 0 ? r.x - 3 : r.x + r.w - flameW + 3;
+    const y = r.y + r.h / 2 - flameH / 2 + jitter;
+    const cx = x + flameW / 2;
+    const cy = y + flameH / 2;
+    const baseRot = p.facing >= 0 ? Math.PI * 0.5 : -Math.PI * 0.5;
+    const wobble = Math.sin(held * 0.012) * 0.08;
+    ctx.translate(Math.floor(cx), Math.floor(cy));
+    ctx.rotate(baseRot + wobble);
+    ctx.drawImage(fr.canvas, fr.cx, fr.cy, fr.cw, fr.ch, Math.floor(-flameW / 2), Math.floor(-flameH / 2), flameW, flameH);
+  } else if (img.complete && img.naturalWidth) {
     const frameW = Math.floor(img.naturalWidth / FIRE_BREATH_FRAME_COUNT);
     const frame = Math.floor(held / FIRE_BREATH_FRAME_MS) % FIRE_BREATH_FRAME_COUNT;
     const h = Math.round(r.h * 2.4 * pulse);
@@ -2590,13 +2995,56 @@ function processMeleeSwordHits() {
     if (rectsOverlap(blade, defRect)) {
       vA.meleeDealt = true;
       const mult = at.damageMult != null ? at.damageMult : 1;
+      const hp = playerMaxHp(at);
+      const secondWindActive = hp > 0 && (at.health ?? hp) / hp <= SECOND_WIND_HP_THRESHOLD;
+      const secondWindTier = at.secondWindTier || 1;
+      const secondWindMult = secondWindActive
+        ? 1 + SECOND_WIND_DAMAGE_BONUS + Math.max(0, secondWindTier - 1) * SECOND_WIND_STACK_BONUS
+        : 1;
       const weaponStats = weaponStatsForId(selectedWeaponForPlayer(ai, at));
-      let dmg = Math.round(weaponStats.damage * mult);
+      let dmg = Math.round(weaponStats.damage * mult * secondWindMult);
       if (ai === 0 && cheatBlueMeleeBurstHits > 0) {
         dmg = CHEAT_BLUE_MELEE_BURST_DAMAGE;
         cheatBlueMeleeBurstHits -= 1;
       }
+      if (at.echoSlash) {
+        const echoTier = at.echoSlashTier || 1;
+        const echoFrac = ECHO_SLASH_BONUS_FRAC + Math.max(0, echoTier - 1) * ECHO_SLASH_STACK_BONUS_FRAC;
+        dmg += Math.max(1, Math.round(weaponStats.damage * mult * echoFrac));
+      }
       def.health = clamp(def.health - dmg, 0, playerMaxHp(def));
+      if (at.vampSlash) {
+        const vampTier = at.vampSlashTier || 1;
+        const healFrac = VAMP_SLASH_HEAL_FRAC + Math.max(0, vampTier - 1) * VAMP_SLASH_STACK_BONUS;
+        at.health = clamp((at.health || 0) + Math.max(1, Math.round(dmg * healFrac)), 0, playerMaxHp(at));
+      }
+      if (at.poisonSword) {
+        def.poisonUntil = Math.max(def.poisonUntil || 0, tNow + POISON_DURATION_MS);
+        def.poisonNextTickAt = tNow + POISON_TICK_MS;
+        const tier = at.poisonSwordTier != null ? at.poisonSwordTier : 1;
+        def.poisonTickDamage = POISON_TICK_DAMAGE + Math.max(0, tier - 1);
+      }
+      if (at.trapSeed) {
+        const usesLeft = Number.isFinite(at.trapSeedUsesLeft) ? at.trapSeedUsesLeft : 0;
+        if (usesLeft <= 0) continue;
+        at.trapSeedUsesLeft = usesLeft - 1;
+        const tier = at.trapSeedTier || 1;
+        const durMs = TRAP_SEED_SPOT_DURATION_MS + Math.max(0, tier - 1) * 1500;
+        const spotY = Math.floor(getPlayerBaseY(def) + PLAYER_BODY_H - TRAP_SEED_SPOT_H);
+        localState.projectiles.push({
+          trapSeedSpot: true,
+          spawnedAt: tNow,
+          expiresAt: tNow + durMs,
+          x: Math.floor(def.x + (PLAYER_BODY_W - TRAP_SEED_SPOT_W) / 2),
+          y: spotY,
+          w: TRAP_SEED_SPOT_W,
+          h: TRAP_SEED_SPOT_H,
+          vx: 0,
+          vy: 0,
+          target: dIdx,
+          damage: 0,
+        });
+      }
       def.vx = (def.x >= at.x ? 1 : -1) * weaponStats.knockback;
     }
   }
@@ -2617,7 +3065,8 @@ function processFireBreathDamage() {
     while (at.fireNextDamageAt <= now) {
       if (rectsOverlap(flame, defRect)) {
         const heldMs = Math.max(0, at.fireNextDamageAt - (at.fireStartAt || at.fireNextDamageAt));
-        const dmg = FIRE_BREATH_BASE_DAMAGE + Math.floor(heldMs / 1000);
+        const tierBonus = ((at.fireBreathTier || 1) - 1) * 2;
+        const dmg = FIRE_BREATH_BASE_DAMAGE + Math.floor(heldMs / 1000) + tierBonus;
         def.health = clamp(def.health - dmg, 0, playerMaxHp(def));
       }
       at.fireNextDamageAt += FIRE_BREATH_TICK_MS;
@@ -2625,15 +3074,76 @@ function processFireBreathDamage() {
   }
 }
 
+function processPoisonDamage() {
+  const now = Date.now();
+  for (const p of localState.players) {
+    if (!p || (p.poisonUntil || 0) <= now) continue;
+    if (!p.poisonNextTickAt || p.poisonNextTickAt < now - POISON_TICK_MS * 3) {
+      p.poisonNextTickAt = now;
+    }
+    while (p.poisonNextTickAt <= now && p.poisonNextTickAt <= (p.poisonUntil || 0)) {
+      const tickDmg = p.poisonTickDamage != null ? p.poisonTickDamage : POISON_TICK_DAMAGE;
+      p.health = clamp(p.health - tickDmg, 0, playerMaxHp(p));
+      p.poisonNextTickAt += POISON_TICK_MS;
+    }
+  }
+}
+
+function applyBurnToPlayer(p, now = Date.now()) {
+  if (!p) return;
+  p.burnUntil = Math.max(p.burnUntil || 0, now + BURN_DURATION_MS);
+  p.burnNextTickAt = now + BURN_TICK_MS;
+}
+
+function processBurnDamage() {
+  const now = Date.now();
+  for (const p of localState.players) {
+    if (!p || (p.burnUntil || 0) <= now) continue;
+    if (!p.burnNextTickAt || p.burnNextTickAt < now - BURN_TICK_MS * 3) {
+      p.burnNextTickAt = now;
+    }
+    while (p.burnNextTickAt <= now && p.burnNextTickAt <= (p.burnUntil || 0)) {
+      p.health = clamp(p.health - BURN_TICK_DAMAGE, 0, playerMaxHp(p));
+      p.burnNextTickAt += BURN_TICK_MS;
+    }
+  }
+}
+
+function spawnFireBreathBurst(attackerIdx) {
+  if (Date.now() < roundLockUntil) return;
+  const attacker = localState.players[attackerIdx];
+  if (!attacker?.fireBreath || !isDragonCharacterForPlayer(attackerIdx)) return;
+  const fac = attacker.facing >= 0 ? 1 : -1;
+  const baseY = getPlayerBaseY(attacker);
+  const cy = baseY + Math.floor(PLAYER_BODY_H * 0.42) - FIRE_BURST_H / 2;
+  const baseX = fac > 0 ? attacker.x + PLAYER_BODY_W : attacker.x - FIRE_BURST_W;
+  localState.projectiles.push({
+    fireBurst: true,
+    spawnedAt: Date.now(),
+    x: baseX,
+    y: cy,
+    w: FIRE_BURST_W,
+    h: FIRE_BURST_H,
+    vx: fac * FIRE_BURST_SPEED,
+    vy: 0,
+    target: attackerIdx === 0 ? 1 : 0,
+    damage: FIRE_BURST_HIT_DAMAGE,
+    freezeTriangleUntil: 0,
+    freezeRootMs: 0,
+  });
+}
+
 function tryJump(idx, code) {
   if (visualState[idx].charging) return;
   const p = localState.players[idx];
+  if ((p.freezeRootUntil || 0) > Date.now()) return;
   const now = performance.now();
   const prev = keyTimes.get(code) || 0;
   keyTimes.set(code, now);
   const boosted = now - prev < 260;
   if (p.infiniteJumps) {
-    p.vy = JUMP_VELOCITY * (boosted ? 1.12 : 1);
+    const jm = 1 + 0.06 * (p.skyJumpStacks || 0);
+    p.vy = JUMP_VELOCITY * jm * (boosted ? 1.12 : 1);
     p.onGround = false;
     p.jumpsUsed = Math.min(p.jumpsUsed + 1, 9);
     return;
@@ -2646,6 +3156,7 @@ function tryJump(idx, code) {
 }
 
 function doMelee(attackerIdx) {
+  if (playerInEnemyFire(attackerIdx)) return false;
   const attacker = localState.players[attackerIdx];
   const t0 = Date.now();
   const weaponStats = weaponStatsForId(selectedWeaponForPlayer(attackerIdx, attacker));
@@ -2693,6 +3204,7 @@ function computeChargedShot(heldMs) {
  */
 function fireProjectile(attackerIdx, override = null) {
   if (Date.now() < roundLockUntil) return;
+  if (playerInEnemyFire(attackerIdx)) return;
   const attacker = localState.players[attackerIdx];
   const orbCost = attacker.tripleShot ? 3 : 1;
   const ammo = attacker.orbAmmo != null ? attacker.orbAmmo : ORB_AMMO_PER_ROUND;
@@ -2722,9 +3234,18 @@ function fireProjectile(attackerIdx, override = null) {
     speed = s.speed;
   }
   const mult = attacker.damageMult != null ? attacker.damageMult : 1;
-  const dmg = Math.round(damage * mult);
-  const freezeTriangleUntil = attacker.freezeShot ? Date.now() + FREEZE_HIT_ROOT_MS : 0;
-  const freezeRootMs = attacker.freezeShot ? FREEZE_HIT_ROOT_MS : 0;
+  const hp = playerMaxHp(attacker);
+  const secondWindActive = hp > 0 && (attacker.health ?? hp) / hp <= SECOND_WIND_HP_THRESHOLD;
+  const secondWindTier = attacker.secondWindTier || 1;
+  const secondWindMult = secondWindActive
+    ? 1 + SECOND_WIND_DAMAGE_BONUS + Math.max(0, secondWindTier - 1) * SECOND_WIND_STACK_BONUS
+    : 1;
+  const instBonus = attacker.instantMaxCharge ? attacker.instantChargeBonusDmg || 0 : 0;
+  const tripleBonus = attacker.tripleShot ? attacker.tripleDamageBonus || 0 : 0;
+  const dmg = Math.round(damage * mult * secondWindMult) + instBonus + tripleBonus;
+  const freezeBonus = attacker.freezeRootBonusMs || 0;
+  const freezeTriangleUntil = attacker.freezeShot ? Date.now() + FREEZE_HIT_ROOT_MS + freezeBonus : 0;
+  const freezeRootMs = attacker.freezeShot ? FREEZE_HIT_ROOT_MS + freezeBonus : 0;
   const cy = attacker.y + Math.floor(PLAYER_BODY_H * 0.42) + (6 - h) / 2;
   const baseX = attacker.x + Math.floor(PLAYER_BODY_W * 0.62) + 2;
   const target = attackerIdx === 0 ? 1 : 0;
@@ -2740,6 +3261,7 @@ function fireProjectile(attackerIdx, override = null) {
       damage: dmg,
       freezeTriangleUntil,
       freezeRootMs,
+      ricochetLeft: attacker.ricochetOrb ? 1 + Math.max(0, (attacker.ricochetOrbTier || 1) - 1) : 0,
     });
   };
   if (attacker.tripleShot) {
@@ -2798,10 +3320,41 @@ function clearCombatBuffsFromPlayers() {
     delete p.fireBreathing;
     delete p.freezeShot;
     delete p.groundPound;
+    delete p.teleport;
+    delete p.poisonSword;
     delete p.groundPoundUsesLeft;
+    delete p.teleportUsesLeft;
     delete p.freezeRootUntil;
     delete p.fireStartAt;
     delete p.fireNextDamageAt;
+    delete p.fireCooldownUntil;
+    delete p.poisonUntil;
+    delete p.poisonNextTickAt;
+    delete p.poisonTickDamage;
+    delete p.burnUntil;
+    delete p.burnNextTickAt;
+    delete p.fireBreathTier;
+    delete p.freezeRootBonusMs;
+    delete p.poisonSwordTier;
+    delete p.instantChargeBonusDmg;
+    delete p.tripleDamageBonus;
+    delete p.skyJumpStacks;
+    delete p.groundPoundStack;
+    delete p.teleportStack;
+    delete p.vampSlash;
+    delete p.vampSlashTier;
+    delete p.heavyLanding;
+    delete p.heavyLandingTier;
+    delete p.secondWind;
+    delete p.secondWindTier;
+    delete p.ricochetOrb;
+    delete p.ricochetOrbTier;
+    delete p.trapSeed;
+    delete p.trapSeedTier;
+    delete p.trapSeedUsesLeft;
+    delete p.echoSlash;
+    delete p.echoSlashTier;
+    delete p.cardLoadout;
   }
 }
 
@@ -2877,6 +3430,7 @@ function syncRedThousandHpAfterLocalReset() {
 
 let fireBindState = { active: false, playerIdx: 0, online: false, onDone: null };
 let groundPoundBindState = { active: false, playerIdx: 0, online: false, onDone: null };
+let teleportBindState = { active: false, playerIdx: 0, online: false, onDone: null };
 
 function finishFireBreathKeyBind() {
   const done = fireBindState.onDone;
@@ -2898,8 +3452,8 @@ function renderFireBreathBindPrompt(message = "") {
   arcadeActionsEl.innerHTML = "";
   if (arcadeExtraEl) {
     arcadeExtraEl.innerHTML = message
-      ? `<p class="bind-hint">${escapeHtml(message)}</p><p class="bind-muted">Pick a key that is not already used by movement, jump, melee, or orb.</p>`
-      : `<p class="bind-muted">Choose a new unused key. Existing controls cannot be reused.</p>`;
+      ? `<p class="bind-hint">${escapeHtml(message)}</p>`
+      : `<p class="bind-muted">Press any key—even one you already use for move, jump, melee, or orb.</p>`;
   }
   overlayEl.classList.remove("hidden");
 }
@@ -2909,7 +3463,7 @@ function startFireBreathKeyBind(playerIdx, online = false, onDone = null) {
     if (typeof onDone === "function") onDone();
     return;
   }
-  if (fireBindState.active || groundPoundBindState.active) return;
+  if (fireBindState.active || groundPoundBindState.active || teleportBindState.active) return;
   fireBindState = { active: true, playerIdx, online, onDone };
   renderFireBreathBindPrompt();
   window.addEventListener("keydown", onFireBreathBindKeydown, true);
@@ -2921,10 +3475,6 @@ function onFireBreathBindKeydown(e) {
   e.stopPropagation();
   const code = e.code;
   if (!code || code === "Escape") return;
-  if (bindingCodesFlat().has(code)) {
-    renderFireBreathBindPrompt(`${formatKeyLabel(code)} is already used. Pick another key.`);
-    return;
-  }
   if (fireBindState.online) {
     keyBindings.online.fire = code;
   } else if (fireBindState.playerIdx === 0) {
@@ -2956,8 +3506,8 @@ function renderGroundPoundBindPrompt(message = "") {
   arcadeActionsEl.innerHTML = "";
   if (arcadeExtraEl) {
     arcadeExtraEl.innerHTML = message
-      ? `<p class="bind-hint">${escapeHtml(message)}</p><p class="bind-muted">Pick a key that is not already used by movement, jump, melee, orb, or Fire Breath.</p>`
-      : `<p class="bind-muted">Choose a new unused key. Existing controls cannot be reused.</p>`;
+      ? `<p class="bind-hint">${escapeHtml(message)}</p>`
+      : `<p class="bind-muted">Press any key—even one you already use for move, jump, melee, orb, or Fire Breath.</p>`;
   }
   overlayEl.classList.remove("hidden");
 }
@@ -2967,7 +3517,7 @@ function startGroundPoundKeyBind(playerIdx, online = false, onDone = null) {
     if (typeof onDone === "function") onDone();
     return;
   }
-  if (groundPoundBindState.active || fireBindState.active) return;
+  if (groundPoundBindState.active || fireBindState.active || teleportBindState.active) return;
   groundPoundBindState = { active: true, playerIdx, online, onDone };
   renderGroundPoundBindPrompt();
   window.addEventListener("keydown", onGroundPoundBindKeydown, true);
@@ -2979,10 +3529,6 @@ function onGroundPoundBindKeydown(e) {
   e.stopPropagation();
   const code = e.code;
   if (!code || code === "Escape") return;
-  if (bindingCodesFlat().has(code)) {
-    renderGroundPoundBindPrompt(`${formatKeyLabel(code)} is already used. Pick another key.`);
-    return;
-  }
   if (groundPoundBindState.online) {
     keyBindings.online.groundPound = code;
   } else if (groundPoundBindState.playerIdx === 0) {
@@ -3002,6 +3548,7 @@ function groundedLayerY(p) {
 
 function triggerGroundPoundLocal(attackerIdx) {
   if (Date.now() < roundLockUntil) return false;
+  if (playerInEnemyFire(attackerIdx)) return false;
   const attacker = localState.players[attackerIdx];
   if (!attacker?.groundPound) return false;
   const usesLeft = Number.isFinite(attacker.groundPoundUsesLeft) ? attacker.groundPoundUsesLeft : 0;
@@ -3023,23 +3570,317 @@ function triggerGroundPoundLocal(attackerIdx) {
   return true;
 }
 
+function finishTeleportKeyBind() {
+  const done = teleportBindState.onDone;
+  teleportBindState = { active: false, playerIdx: 0, online: false, onDone: null };
+  window.removeEventListener("keydown", onTeleportBindKeydown, true);
+  hideArcadeOverlay();
+  if (typeof done === "function") done();
+}
+
+function renderTeleportBindPrompt(message = "") {
+  arcadeStep = "teleport_bind";
+  teardownRemapWizard();
+  clearArcadeExtra();
+  arcadeActionsEl.classList.remove("arcade-actions--char-pick");
+  stepLabelEl.textContent = "Teleport";
+  arcadeTitleEl.textContent = "Map Teleport";
+  arcadeTextEl.textContent = "Press the key you want to use for Teleport. The round is paused until you choose a key.";
+  arcadeActionsEl.innerHTML = "";
+  if (arcadeExtraEl) {
+    arcadeExtraEl.innerHTML = message
+      ? `<p class="bind-hint">${escapeHtml(message)}</p>`
+      : `<p class="bind-muted">Press any key—even one you already use for move, jump, melee, orb, Fire Breath, or Ground Pound.</p>`;
+  }
+  overlayEl.classList.remove("hidden");
+}
+
+function startTeleportKeyBind(playerIdx, online = false, onDone = null) {
+  if (touchState.enabled) {
+    if (typeof onDone === "function") onDone();
+    return;
+  }
+  if (teleportBindState.active || fireBindState.active || groundPoundBindState.active) return;
+  teleportBindState = { active: true, playerIdx, online, onDone };
+  renderTeleportBindPrompt();
+  window.addEventListener("keydown", onTeleportBindKeydown, true);
+}
+
+function onTeleportBindKeydown(e) {
+  if (!teleportBindState.active) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const code = e.code;
+  if (!code || code === "Escape") return;
+  if (teleportBindState.online) {
+    keyBindings.online.teleport = code;
+  } else if (teleportBindState.playerIdx === 0) {
+    keyBindings.p0.teleport = code;
+  } else {
+    keyBindings.p1.teleport = code;
+  }
+  saveKeyBindings();
+  showBanner(`Teleport mapped to ${formatKeyLabel(code)}`, 2200);
+  finishTeleportKeyBind();
+}
+
+function triggerTeleportLocal(attackerIdx) {
+  if (Date.now() < roundLockUntil) return false;
+  if (playerInEnemyFire(attackerIdx)) return false;
+  const attacker = localState.players[attackerIdx];
+  if (!attacker?.teleport) return false;
+  const usesLeft = Number.isFinite(attacker.teleportUsesLeft) ? attacker.teleportUsesLeft : 0;
+  if (usesLeft <= 0) return false;
+  const enemy = localState.players[1 - attackerIdx];
+  const dir = enemy.facing || (enemy.x >= attacker.x ? 1 : -1);
+  const targetX = clamp(enemy.x - dir * (PLAYER_BODY_W + 10), 0, VIEW_W - PLAYER_BODY_W);
+  attacker.teleportUsesLeft = usesLeft - 1;
+  attacker.x = targetX;
+  attacker.y = enemy.y;
+  attacker.vx = 0;
+  return true;
+}
+
 function startFireBreathLocal(idx) {
   const p = localState.players[idx];
   if (!p?.fireBreath || p.fireBreathing || Date.now() < roundLockUntil) return;
+  if (playerInEnemyFire(idx)) return;
+  const now = Date.now();
+  if ((p.fireCooldownUntil || 0) > now) return;
   p.fireBreathing = true;
-  p.fireStartAt = Date.now();
-  p.fireNextDamageAt = Date.now();
+  p.fireStartAt = now;
+  p.fireNextDamageAt = now;
   p.vx = 0;
 }
 
-function stopFireBreathLocal(idx) {
+function stopFireBreathLocal(idx, shootOnRelease = false) {
   const p = localState.players[idx];
   if (!p) return;
+  const wasBreathing = !!p.fireBreathing;
+  if (wasBreathing) {
+    p.fireCooldownUntil = Math.max(p.fireCooldownUntil || 0, Date.now() + FIRE_BREATH_COOLDOWN_MS);
+    if (shootOnRelease && mode !== "online") {
+      spawnFireBreathBurst(idx);
+    }
+  }
   p.fireBreathing = false;
 }
 
 let buffAutoPickTimer = null;
 let buffPickGateTimer = null;
+let pendingBuffReplace = null;
+
+function ensurePlayerCardLoadout(p) {
+  if (!Array.isArray(p.cardLoadout)) p.cardLoadout = [];
+  return p.cardLoadout;
+}
+
+function removeBuffEffectsFromPlayer(p, buffId) {
+  if (buffId === "triple") {
+    delete p.tripleShot;
+    delete p.tripleDamageBonus;
+  } else if (buffId === "tank") {
+    delete p.maxHealth;
+    p.health = clamp(p.health, 0, playerMaxHp(p));
+  } else if (buffId === "power") {
+    delete p.damageMult;
+  } else if (buffId === "infiniteJumps") {
+    delete p.infiniteJumps;
+    delete p.skyJumpStacks;
+  } else if (buffId === "infiniteAmmo") {
+    delete p.infiniteAmmo;
+  } else if (buffId === "instantMaxCharge") {
+    delete p.instantMaxCharge;
+    delete p.instantChargeBonusDmg;
+  } else if (buffId === "meleeLong") {
+    delete p.meleeRangeScale;
+    delete p.meleeSwingScale;
+  } else if (buffId === "fireBreath") {
+    delete p.fireBreath;
+    delete p.fireBreathing;
+    delete p.fireBreathTier;
+    delete p.fireStartAt;
+    delete p.fireNextDamageAt;
+    delete p.fireCooldownUntil;
+  } else if (buffId === "freeze") {
+    delete p.freezeShot;
+    delete p.freezeRootBonusMs;
+  } else if (buffId === "groundPound") {
+    delete p.groundPound;
+    delete p.groundPoundUsesLeft;
+    delete p.groundPoundStack;
+  } else if (buffId === "poisonSword") {
+    delete p.poisonSword;
+    delete p.poisonSwordTier;
+  } else if (buffId === "teleport") {
+    delete p.teleport;
+    delete p.teleportUsesLeft;
+    delete p.teleportStack;
+  } else if (buffId === "vampSlash") {
+    delete p.vampSlash;
+    delete p.vampSlashTier;
+  } else if (buffId === "heavyLanding") {
+    delete p.heavyLanding;
+    delete p.heavyLandingTier;
+  } else if (buffId === "secondWind") {
+    delete p.secondWind;
+    delete p.secondWindTier;
+  } else if (buffId === "ricochetOrb") {
+    delete p.ricochetOrb;
+    delete p.ricochetOrbTier;
+  } else if (buffId === "trapSeed") {
+    delete p.trapSeed;
+    delete p.trapSeedTier;
+    delete p.trapSeedUsesLeft;
+  } else if (buffId === "echoSlash") {
+    delete p.echoSlash;
+    delete p.echoSlashTier;
+  }
+}
+
+function buffIcon(id) {
+  return BUFF_DEFS[id]?.icon || "🃏";
+}
+
+/**
+ * First pick applies the buff; picking the same card again upgrades it for the rest of the match.
+ * @returns {boolean} false if the pick is invalid (e.g. Fire Breath without Dragon)
+ */
+function applyOrUpgradeBuffToPlayer(L, loserIdx, buffId, replaceBuffId = null) {
+  const loadout = ensurePlayerCardLoadout(L);
+  const hadBuff = loadout.includes(buffId);
+  if (!hadBuff && loadout.length >= CARD_LOADOUT_MAX) {
+    if (!replaceBuffId || !loadout.includes(replaceBuffId) || replaceBuffId === buffId) {
+      return { ok: false, reason: "replace_required" };
+    }
+    removeBuffEffectsFromPlayer(L, replaceBuffId);
+    L.cardLoadout = loadout.filter((id) => id !== replaceBuffId);
+  }
+  if (buffId === "fireBreath") {
+    if (!isDragonCharacterForPlayer(loserIdx, L)) return { ok: false, reason: "dragon_only" };
+    if (L.fireBreath) {
+      L.fireBreathTier = (L.fireBreathTier || 1) + 1;
+    } else {
+      L.fireBreath = true;
+      L.fireBreathTier = 1;
+    }
+  } else if (buffId === "triple") {
+    if (L.tripleShot) {
+      L.tripleDamageBonus = (L.tripleDamageBonus || 0) + 4;
+    } else {
+      L.tripleShot = true;
+    }
+  } else if (buffId === "tank") {
+    const base = L.maxHealth != null && L.maxHealth > 0 ? L.maxHealth : 100;
+    L.maxHealth = base + TANK_BUFF_HP_PER_PICK;
+  } else if (buffId === "power") {
+    const cur = L.damageMult != null && L.damageMult > 0 ? L.damageMult : 1;
+    L.damageMult = cur * POWER_BUFF_DAMAGE_MULT;
+  } else if (buffId === "infiniteJumps") {
+    if (L.infiniteJumps) {
+      L.skyJumpStacks = (L.skyJumpStacks || 0) + 1;
+    } else {
+      L.infiniteJumps = true;
+    }
+  } else if (buffId === "infiniteAmmo") {
+    if (L.infiniteAmmo) {
+      const cap = ORB_AMMO_PER_ROUND + 15;
+      const cur = L.orbAmmo != null ? L.orbAmmo : ORB_AMMO_PER_ROUND;
+      L.orbAmmo = Math.min(cap, cur + 5);
+    } else {
+      L.infiniteAmmo = true;
+      L.orbAmmo = ORB_AMMO_PER_ROUND;
+    }
+  } else if (buffId === "instantMaxCharge") {
+    if (L.instantMaxCharge) {
+      L.instantChargeBonusDmg = (L.instantChargeBonusDmg || 0) + 4;
+    } else {
+      L.instantMaxCharge = true;
+    }
+  } else if (buffId === "meleeLong") {
+    L.meleeRangeScale = (L.meleeRangeScale != null ? L.meleeRangeScale : 1) * 2;
+    L.meleeSwingScale = (L.meleeSwingScale != null ? L.meleeSwingScale : 1) * 2;
+  } else if (buffId === "freeze") {
+    if (L.freezeShot) {
+      L.freezeRootBonusMs = (L.freezeRootBonusMs || 0) + 600;
+    } else {
+      L.freezeShot = true;
+    }
+  } else if (buffId === "groundPound") {
+    if (L.groundPound) {
+      L.groundPoundStack = (L.groundPoundStack || 0) + 1;
+      L.groundPoundUsesLeft = 2 + (L.groundPoundStack || 0);
+    } else {
+      L.groundPound = true;
+      L.groundPoundStack = 0;
+      L.groundPoundUsesLeft = 2;
+    }
+  } else if (buffId === "teleport") {
+    if (L.teleport) {
+      L.teleportStack = (L.teleportStack || 0) + 1;
+      L.teleportUsesLeft = 1 + (L.teleportStack || 0);
+    } else {
+      L.teleport = true;
+      L.teleportStack = 0;
+      L.teleportUsesLeft = 1;
+    }
+  } else if (buffId === "poisonSword") {
+    if (L.poisonSword) {
+      L.poisonSwordTier = (L.poisonSwordTier || 1) + 1;
+    } else {
+      L.poisonSword = true;
+      L.poisonSwordTier = 1;
+    }
+  } else if (buffId === "vampSlash") {
+    if (L.vampSlash) {
+      L.vampSlashTier = (L.vampSlashTier || 1) + 1;
+    } else {
+      L.vampSlash = true;
+      L.vampSlashTier = 1;
+    }
+  } else if (buffId === "heavyLanding") {
+    if (L.heavyLanding) {
+      L.heavyLandingTier = (L.heavyLandingTier || 1) + 1;
+    } else {
+      L.heavyLanding = true;
+      L.heavyLandingTier = 1;
+    }
+  } else if (buffId === "secondWind") {
+    if (L.secondWind) {
+      L.secondWindTier = (L.secondWindTier || 1) + 1;
+    } else {
+      L.secondWind = true;
+      L.secondWindTier = 1;
+    }
+  } else if (buffId === "ricochetOrb") {
+    if (L.ricochetOrb) {
+      L.ricochetOrbTier = (L.ricochetOrbTier || 1) + 1;
+    } else {
+      L.ricochetOrb = true;
+      L.ricochetOrbTier = 1;
+    }
+  } else if (buffId === "trapSeed") {
+    if (L.trapSeed) {
+      L.trapSeedTier = (L.trapSeedTier || 1) + 1;
+      L.trapSeedUsesLeft = 2 + Math.max(0, (L.trapSeedTier || 1) - 1);
+    } else {
+      L.trapSeed = true;
+      L.trapSeedTier = 1;
+      L.trapSeedUsesLeft = 2;
+    }
+  } else if (buffId === "echoSlash") {
+    if (L.echoSlash) {
+      L.echoSlashTier = (L.echoSlashTier || 1) + 1;
+    } else {
+      L.echoSlash = true;
+      L.echoSlashTier = 1;
+    }
+  } else {
+    return { ok: false, reason: "invalid" };
+  }
+  if (!hadBuff) ensurePlayerCardLoadout(L).push(buffId);
+  return { ok: true };
+}
 
 function hideBuffPickOverlay() {
   const wrap = document.getElementById("buffPickOverlay");
@@ -3055,59 +3896,67 @@ function hideBuffPickOverlay() {
     buffPickGateTimer = null;
   }
   localState.buffPickInputUnlocked = false;
+  pendingBuffReplace = null;
 }
 
 function applyBuffChoice(buffId) {
   if (!localState.buffPickActive || !localState.buffPickInputUnlocked) return;
   if (!BUFF_DEFS[buffId]) return;
+  const loser = localState.buffPickLoser;
+  const loserPlayer = localState.players[loser];
+  const loadout = ensurePlayerCardLoadout(loserPlayer);
+  const needsReplace = !loadout.includes(buffId) && loadout.length >= CARD_LOADOUT_MAX;
+  if (needsReplace && pendingBuffReplace?.buffId !== buffId) {
+    pendingBuffReplace = { buffId };
+    showBuffReplaceChoices(loser, buffId);
+    return;
+  }
+
   if (mode === "online") {
-    if (socket && roomId) socket.emit("buff:pick", { buffId });
+    const me = localState.players[playerIndex];
+    const replaceBuffId = pendingBuffReplace?.buffId === buffId ? pendingBuffReplace.replaceBuffId || null : null;
+    const hadFireBreath = !!me?.fireBreath;
+    const hadGroundPound = !!me?.groundPound;
+    const hadTeleport = !!me?.teleport;
+    if (socket && roomId) socket.emit("buff:pick", { buffId, replaceBuffId });
     localState.buffPickActive = false;
+    pendingBuffReplace = null;
     hideBuffPickOverlay();
-    if (buffId === "fireBreath") {
+    if (buffId === "fireBreath" && !hadFireBreath) {
       startFireBreathKeyBind(playerIndex, true, () => {
         if (socket && roomId) socket.emit("fire:bind:done");
       });
-    } else if (buffId === "groundPound") {
+    } else if (buffId === "groundPound" && !hadGroundPound) {
       startGroundPoundKeyBind(playerIndex, true, () => {
         if (socket && roomId) socket.emit("ground:bind:done");
+      });
+    } else if (buffId === "teleport" && !hadTeleport) {
+      startTeleportKeyBind(playerIndex, true, () => {
+        if (socket && roomId) socket.emit("teleport:bind:done");
       });
     }
     return;
   }
-  const loser = localState.buffPickLoser;
   const win = loser === 0 ? 1 : 0;
   const L = localState.players[loser];
   const W = localState.players[win];
   healPlayerToCap(W);
-  if (buffId === "triple") {
-    L.tripleShot = true;
-  } else if (buffId === "tank") {
-    const prevMax = playerMaxHp(L);
-    L.maxHealth = prevMax + 30;
-  } else if (buffId === "power") {
-    const cur = L.damageMult != null && L.damageMult > 0 ? L.damageMult : 1;
-    L.damageMult = cur * POWER_BUFF_DAMAGE_MULT;
-  } else if (buffId === "infiniteJumps") {
-    L.infiniteJumps = true;
-  } else if (buffId === "infiniteAmmo") {
-    L.infiniteAmmo = true;
-    L.orbAmmo = ORB_AMMO_PER_ROUND;
-  } else if (buffId === "instantMaxCharge") {
-    L.instantMaxCharge = true;
-  } else if (buffId === "meleeLong") {
-    L.meleeRangeScale = (L.meleeRangeScale != null ? L.meleeRangeScale : 1) * 2;
-    L.meleeSwingScale = (L.meleeSwingScale != null ? L.meleeSwingScale : 1) * 2;
-  } else if (buffId === "fireBreath") {
-    L.fireBreath = true;
-  } else if (buffId === "freeze") {
-    L.freezeShot = true;
-  } else if (buffId === "groundPound") {
-    L.groundPound = true;
-    L.groundPoundUsesLeft = 2;
+  const replaceBuffId = pendingBuffReplace?.buffId === buffId ? pendingBuffReplace.replaceBuffId || null : null;
+  const needFireBind = buffId === "fireBreath" && !L.fireBreath;
+  const needGroundPoundBind = buffId === "groundPound" && !L.groundPound;
+  const needTeleportBind = buffId === "teleport" && !L.teleport;
+  const result = applyOrUpgradeBuffToPlayer(L, loser, buffId, replaceBuffId);
+  if (!result.ok) {
+    if (result.reason === "dragon_only") showBanner("Fire Breath is Dragon-only", 1400);
+    if (result.reason === "replace_required") {
+      pendingBuffReplace = { buffId };
+      showBuffReplaceChoices(loser, buffId);
+    }
+    return;
   }
   healPlayerToCap(L);
   localState.buffPickActive = false;
+  pendingBuffReplace = null;
   hideBuffPickOverlay();
   const finishIntermission = () => {
     startLocalRoundCountdown();
@@ -3116,15 +3965,56 @@ function applyBuffChoice(buffId) {
     visualState[0].charging = false;
     visualState[1].charging = false;
   };
-  if (buffId === "fireBreath") {
+  if (needFireBind) {
     startFireBreathKeyBind(loser, false, finishIntermission);
     return;
   }
-  if (buffId === "groundPound") {
+  if (needGroundPoundBind) {
     startGroundPoundKeyBind(loser, false, finishIntermission);
     return;
   }
+  if (needTeleportBind) {
+    startTeleportKeyBind(loser, false, finishIntermission);
+    return;
+  }
   finishIntermission();
+}
+
+function showBuffReplaceChoices(loserIdx, pickedBuffId) {
+  const wrap = document.getElementById("buffPickOverlay");
+  const btnWrap = document.getElementById("buffPickButtons");
+  const title = document.getElementById("buffPickTitle");
+  const sub = document.getElementById("buffPickSub");
+  const gate = document.getElementById("buffPickGateBlock");
+  const p = localState.players[loserIdx];
+  const owned = ensurePlayerCardLoadout(p);
+  if (!btnWrap || !wrap || owned.length === 0) return;
+  if (gate) gate.classList.add("hidden");
+  if (title) title.textContent = `Replace a card for ${BUFF_DEFS[pickedBuffId]?.name || "new card"}`;
+  if (sub) sub.textContent = "Loadout full (5/5). Pick one card to replace.";
+  btnWrap.innerHTML = "";
+  for (const id of owned) {
+    const d = BUFF_DEFS[id];
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "buff-card buff-btn";
+    b.setAttribute("data-replace-buff", id);
+    b.innerHTML = `<span class="buff-card-face">
+      <span class="buff-name">${buffIcon(id)} ${d?.name || id}</span>
+      <span class="buff-desc">${d?.desc || ""}</span>
+    </span>`;
+    btnWrap.appendChild(b);
+  }
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "buff-card buff-btn";
+  cancel.setAttribute("data-replace-cancel", "1");
+  cancel.innerHTML = `<span class="buff-card-face">
+    <span class="buff-name">↩️ Cancel</span>
+    <span class="buff-desc">Go back to the 3 choices</span>
+  </span>`;
+  btnWrap.appendChild(cancel);
+  wrap.classList.remove("hidden");
 }
 
 function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
@@ -3132,8 +4022,9 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
   if (!wrap) return;
   const picked = forcedTriplet
     ? { triplet: forcedTriplet, key: [...forcedTriplet].sort().join("|") }
-    : pickRandomBuffTriplet();
-  const { triplet, key } = picked;
+    : pickRandomBuffTriplet(loserIdx);
+  const triplet = sanitizeBuffTripletForPlayer(picked.triplet, loserIdx);
+  const key = [...triplet].sort().join("|");
   localState.buffPickOptions = triplet;
   localState.buffLastOfferedKey = key;
   const btnWrap = document.getElementById("buffPickButtons");
@@ -3152,7 +4043,7 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
       b.className = "buff-card buff-btn";
       b.setAttribute("data-buff", id);
       b.innerHTML = `<span class="buff-card-face">
-        <span class="buff-name">${d.name}</span>
+        <span class="buff-name">${buffIcon(id)} ${d.name}</span>
         <span class="buff-desc">${d.desc}</span>
         <span class="buff-keys" aria-label="Shortcuts"><kbd>${keyRows[i].k1}</kbd><kbd>${keyRows[i].k2}</kbd></span>
       </span>`;
@@ -3169,6 +4060,7 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
       "Wait 2 seconds without clicking — then pick a card or use A/← · W/↑ · D/→.";
   }
   localState.buffPickInputUnlocked = false;
+  pendingBuffReplace = null;
   if (gate) gate.classList.remove("hidden");
   wrap.classList.remove("hidden");
   if (buffPickGateTimer != null) {
@@ -3196,7 +4088,18 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
     buffAutoPickTimer = setTimeout(() => {
       buffAutoPickTimer = null;
       const opts = localState.buffPickOptions;
-      if (opts && opts.length) applyBuffChoice(opts[Math.floor(Math.random() * opts.length)]);
+      if (opts && opts.length) {
+        const pick = opts[Math.floor(Math.random() * opts.length)];
+        const p = localState.players[loserIdx];
+        const loadout = ensurePlayerCardLoadout(p);
+        if (!loadout.includes(pick) && loadout.length >= CARD_LOADOUT_MAX) {
+          pendingBuffReplace = {
+            buffId: pick,
+            replaceBuffId: loadout[Math.floor(Math.random() * loadout.length)],
+          };
+        }
+        applyBuffChoice(pick);
+      }
     }, BUFF_PICK_GATE_MS + 450);
   }
 }
@@ -3226,26 +4129,40 @@ function updateLocalGame() {
 
   const p1 = localState.players[0];
   const p2 = localState.players[1];
+  if (p1.fireBreathing && playerInEnemyFire(0)) stopFireBreathLocal(0);
+  if (p2.fireBreathing && playerInEnemyFire(1)) stopFireBreathLocal(1);
+  if (p1.fireBreathing && now - (p1.fireStartAt || now) >= FIRE_BREATH_MAX_HOLD_MS) stopFireBreathLocal(0);
+  if (p2.fireBreathing && now - (p2.fireStartAt || now) >= FIRE_BREATH_MAX_HOLD_MS) stopFireBreathLocal(1);
   const p1Rooted = (p1.freezeRootUntil || 0) > now;
   const p2Rooted = (p2.freezeRootUntil || 0) > now;
   if (p1Rooted) p1.vx = 0;
   if (p2Rooted) p2.vx = 0;
-  if (p1.fireBreathing) p1.vx = 0;
-  if (p2.fireBreathing) p2.vx = 0;
   const p1InputLeft = keys.has(b0.left) || touchState.left;
   const p1InputRight = keys.has(b0.right) || touchState.right;
   const p2InputLeft = mode === "multi" ? keys.has(b1.left) : false;
   const p2InputRight = mode === "multi" ? keys.has(b1.right) : false;
-  if (p1.fireBreathing && p1InputLeft !== p1InputRight) p1.facing = p1InputRight ? 1 : -1;
-  if (p2.fireBreathing && p2InputLeft !== p2InputRight) p2.facing = p2InputRight ? 1 : -1;
-  const p1Left = !p1.fireBreathing && !p1Rooted && p1InputLeft;
-  const p1Right = !p1.fireBreathing && !p1Rooted && p1InputRight;
-  const p2Left = !p2.fireBreathing && !p2Rooted && p2InputLeft;
-  const p2Right = !p2.fireBreathing && !p2Rooted && p2InputRight;
+  if (p1InputLeft !== p1InputRight) p1.facing = p1InputRight ? 1 : -1;
+  if (p2InputLeft !== p2InputRight) p2.facing = p2InputRight ? 1 : -1;
+  const p1Left = !p1Rooted && p1InputLeft;
+  const p1Right = !p1Rooted && p1InputRight;
+  const p2Left = !p2Rooted && p2InputLeft;
+  const p2Right = !p2Rooted && p2InputRight;
   const p1MoveSpeed = MOVE_SPEED * (playerInEnemyFire(0) ? FIRE_BREATH_SLOW_MULT : 1);
   const p2MoveSpeed = MOVE_SPEED * (playerInEnemyFire(1) ? FIRE_BREATH_SLOW_MULT : 1);
+  const p1HpMax = playerMaxHp(p1);
+  const p2HpMax = playerMaxHp(p2);
+  const p1SecondWindActive = !!p1.secondWind && p1HpMax > 0 && (p1.health ?? p1HpMax) / p1HpMax <= SECOND_WIND_HP_THRESHOLD;
+  const p2SecondWindActive = !!p2.secondWind && p2HpMax > 0 && (p2.health ?? p2HpMax) / p2HpMax <= SECOND_WIND_HP_THRESHOLD;
+  const p1SwSpeed = p1SecondWindActive
+    ? 1 + SECOND_WIND_SPEED_BONUS + Math.max(0, (p1.secondWindTier || 1) - 1) * SECOND_WIND_STACK_BONUS
+    : 1;
+  const p2SwSpeed = p2SecondWindActive
+    ? 1 + SECOND_WIND_SPEED_BONUS + Math.max(0, (p2.secondWindTier || 1) - 1) * SECOND_WIND_STACK_BONUS
+    : 1;
+  const p1MoveSpeedFinal = p1MoveSpeed * p1SwSpeed;
+  const p2MoveSpeedFinal = p2MoveSpeed * p2SwSpeed;
 
-  const target1 = p1Left === p1Right ? 0 : p1Left ? -p1MoveSpeed : p1MoveSpeed;
+  const target1 = p1Left === p1Right ? 0 : p1Left ? -p1MoveSpeedFinal : p1MoveSpeedFinal;
   const ax1 = Math.abs(target1) < 0.01 ? MOVE_STOP_ACCEL : MOVE_ACCEL;
   p1.vx += (target1 - p1.vx) * ax1;
   if (Math.abs(target1) < 0.01 && Math.abs(p1.vx) < MOVE_VX_SNAP) p1.vx = 0;
@@ -3253,7 +4170,7 @@ function updateLocalGame() {
   else if (Math.abs(p1.vx) > 0.18) p1.facing = p1.vx > 0 ? 1 : -1;
 
   if (mode === "multi") {
-    const target2 = p2Left === p2Right ? 0 : p2Left ? -p2MoveSpeed : p2MoveSpeed;
+    const target2 = p2Left === p2Right ? 0 : p2Left ? -p2MoveSpeedFinal : p2MoveSpeedFinal;
     const ax2 = Math.abs(target2) < 0.01 ? MOVE_STOP_ACCEL : MOVE_ACCEL;
     p2.vx += (target2 - p2.vx) * ax2;
     if (Math.abs(target2) < 0.01 && Math.abs(p2.vx) < MOVE_VX_SNAP) p2.vx = 0;
@@ -3261,7 +4178,7 @@ function updateLocalGame() {
     else if (Math.abs(p2.vx) > 0.18) p2.facing = p2.vx > 0 ? 1 : -1;
   } else {
     const d = p1.x - p2.x;
-    const target2 = Math.abs(d) > 60 ? (d > 0 ? p2MoveSpeed * 0.75 : -p2MoveSpeed * 0.75) : 0;
+    const target2 = Math.abs(d) > 60 ? (d > 0 ? p2MoveSpeedFinal * 0.75 : -p2MoveSpeedFinal * 0.75) : 0;
     const ax2b = Math.abs(target2) < 0.01 ? MOVE_STOP_ACCEL : MOVE_ACCEL * 0.88;
     p2.vx += (target2 - p2.vx) * ax2b;
     if (Math.abs(target2) < 0.01 && Math.abs(p2.vx) < MOVE_VX_SNAP) p2.vx = 0;
@@ -3286,6 +4203,7 @@ function updateLocalGame() {
 
   for (let pi = 0; pi < localState.players.length; pi += 1) {
     const p = localState.players[pi];
+    const wasOnGround = !!p.onGround;
     const previousBottom = p.y + PLAYER_BODY_H;
     const slowFall = visualState[pi].charging && !p.onGround;
     p.vy += GRAVITY * (slowFall ? CHARGE_AIR_GRAVITY_MULT : 1);
@@ -3318,18 +4236,60 @@ function updateLocalGame() {
     } else if (!landed) {
       p.onGround = false;
     }
+    if (!wasOnGround && p.onGround && p.heavyLanding) {
+      const enemyIdx = 1 - pi;
+      const enemy = localState.players[enemyIdx];
+      const dx = Math.abs((enemy.x + PLAYER_BODY_W / 2) - (p.x + PLAYER_BODY_W / 2));
+      if (dx <= HEAVY_LANDING_RANGE) {
+        const tier = p.heavyLandingTier || 1;
+        const dmg = HEAVY_LANDING_DAMAGE + Math.max(0, tier - 1) * HEAVY_LANDING_STACK_BONUS;
+        enemy.health = clamp(enemy.health - dmg, 0, playerMaxHp(enemy));
+        enemy.vy = Math.min(enemy.vy || 0, HEAVY_LANDING_UPWARD_VY);
+        enemy.onGround = false;
+        enemy.jumpsUsed = Math.max(enemy.jumpsUsed || 0, 1);
+      }
+    }
   }
 
   processMeleeSwordHits();
   processFireBreathDamage();
+  processPoisonDamage();
+  processBurnDamage();
 
   localState.projectiles.forEach((shot) => {
+    if (shot.trapSeedSpot) {
+      if ((shot.expiresAt || 0) <= Date.now()) {
+        shot.dead = true;
+        return;
+      }
+      const target = localState.players[shot.target];
+      if (!target) return;
+      const hit = rectsOverlap(
+        { x: shot.x, y: shot.y, w: shot.w, h: shot.h },
+        { x: target.x, y: target.y, w: PLAYER_BODY_W, h: PLAYER_BODY_H }
+      );
+      if (hit) {
+        target.poisonUntil = Math.max(target.poisonUntil || 0, Date.now() + TRAP_SEED_POISON_DURATION_MS);
+        target.poisonNextTickAt = Date.now() + TRAP_SEED_POISON_TICK_MS;
+        target.poisonTickDamage = TRAP_SEED_POISON_TICK_DAMAGE;
+        shot.dead = true;
+      }
+      return;
+    }
     shot.x += shot.vx;
     shot.y += shot.vy ?? 0;
     const shotRect = { x: shot.x, y: shot.y, w: shot.w, h: shot.h };
     for (const plat of currentPlatforms()) {
       if (rectsOverlap(shotRect, plat)) {
-        shot.dead = true;
+        if ((shot.ricochetLeft || 0) > 0) {
+          shot.ricochetLeft -= 1;
+          if (Math.abs(shot.vy || 0) > 0.2) shot.vy = -(shot.vy || 0);
+          else shot.vx = -(shot.vx || 0);
+          shot.x += shot.vx * 0.8;
+          shot.y += (shot.vy || 0) * 0.8;
+        } else {
+          shot.dead = true;
+        }
         break;
       }
     }
@@ -3343,13 +4303,25 @@ function updateLocalGame() {
     });
     if (hit) {
       target.health = clamp(target.health - shot.damage, 0, playerMaxHp(target));
+      if (shot.fireBurst) {
+        applyBurnToPlayer(target, Date.now());
+      }
       if (shot.freezeRootMs) {
         target.freezeRootUntil = Math.max(target.freezeRootUntil || 0, Date.now() + shot.freezeRootMs);
         target.vx = 0;
       }
       shot.dead = true;
     }
-    if (shot.x < -50 || shot.x > VIEW_W + 50 || shot.y < -80 || shot.y > VIEW_H + 40) {
+    if (shot.x < 0 || shot.x + shot.w > VIEW_W) {
+      if ((shot.ricochetLeft || 0) > 0) {
+        shot.ricochetLeft -= 1;
+        shot.vx = -(shot.vx || 0);
+        shot.x = clamp(shot.x, 0, VIEW_W - shot.w);
+      } else {
+        shot.dead = true;
+      }
+    }
+    if (shot.y < -80 || shot.y > VIEW_H + 40) {
       shot.dead = true;
     }
   });
@@ -3401,8 +4373,24 @@ function updateLocalGame() {
     p2.fireStartAt = 0;
     p1.fireNextDamageAt = 0;
     p2.fireNextDamageAt = 0;
-    if (p1.groundPound) p1.groundPoundUsesLeft = 2;
-    if (p2.groundPound) p2.groundPoundUsesLeft = 2;
+    p1.fireCooldownUntil = 0;
+    p2.fireCooldownUntil = 0;
+    p1.poisonUntil = 0;
+    p2.poisonUntil = 0;
+    p1.poisonNextTickAt = 0;
+    p2.poisonNextTickAt = 0;
+    p1.poisonTickDamage = 0;
+    p2.poisonTickDamage = 0;
+    p1.burnUntil = 0;
+    p2.burnUntil = 0;
+    p1.burnNextTickAt = 0;
+    p2.burnNextTickAt = 0;
+    if (p1.groundPound) p1.groundPoundUsesLeft = 2 + (p1.groundPoundStack || 0);
+    if (p2.groundPound) p2.groundPoundUsesLeft = 2 + (p2.groundPoundStack || 0);
+    if (p1.teleport) p1.teleportUsesLeft = 1 + (p1.teleportStack || 0);
+    if (p2.teleport) p2.teleportUsesLeft = 1 + (p2.teleportStack || 0);
+    if (p1.trapSeed) p1.trapSeedUsesLeft = 2 + Math.max(0, (p1.trapSeedTier || 1) - 1);
+    if (p2.trapSeed) p2.trapSeedUsesLeft = 2 + Math.max(0, (p2.trapSeedTier || 1) - 1);
     localState.projectiles = [];
     if (!matchOver && mode !== "single") {
       localState.buffPickLoser = loser;
@@ -3557,7 +4545,9 @@ function setupSocket() {
       levelIndex: Number.isInteger(state.levelIndex) ? state.levelIndex : localState.levelIndex,
     };
     localState.players.forEach((p, i) => {
+      ensurePlayerCardLoadout(p);
       if (p?.fireBreathing && !p.fireStartAt) p.fireStartAt = Date.now();
+      if (mode === "online" && i !== playerIndex && !p?.character) p.character = "knight";
       if (p?.fireBreath && i === playerIndex && !touchState.enabled && !onlineK().fire) {
         startFireBreathKeyBind(playerIndex, true, () => {
           if (socket && roomId) socket.emit("fire:bind:done");
@@ -3566,6 +4556,11 @@ function setupSocket() {
       if (p?.groundPound && i === playerIndex && !touchState.enabled && !onlineK().groundPound) {
         startGroundPoundKeyBind(playerIndex, true, () => {
           if (socket && roomId) socket.emit("ground:bind:done");
+        });
+      }
+      if (p?.teleport && i === playerIndex && !touchState.enabled && !onlineK().teleport) {
+        startTeleportKeyBind(playerIndex, true, () => {
+          if (socket && roomId) socket.emit("teleport:bind:done");
         });
       }
     });
@@ -3636,6 +4631,7 @@ function localReset() {
         jumpsUsed: 0,
         onGround: true,
         chargeStartAt: 0,
+        cardLoadout: [],
       },
       {
         x: 760,
@@ -3651,6 +4647,7 @@ function localReset() {
         jumpsUsed: 0,
         onGround: true,
         chargeStartAt: 0,
+        cardLoadout: [],
       },
     ],
     projectiles: [],
@@ -3737,14 +4734,20 @@ window.addEventListener("keydown", (e) => {
     if (localState.players[0]?.groundPound && b0.groundPound && e.code === b0.groundPound && !e.repeat) {
       triggerGroundPoundLocal(0);
     }
+    if (localState.players[0]?.teleport && b0.teleport && e.code === b0.teleport && !e.repeat) {
+      triggerTeleportLocal(0);
+    }
     if (mode === "multi" && localState.players[1]?.fireBreath && b1.fire && e.code === b1.fire && !e.repeat) {
       startFireBreathLocal(1);
     }
     if (mode === "multi" && localState.players[1]?.groundPound && b1.groundPound && e.code === b1.groundPound && !e.repeat) {
       triggerGroundPoundLocal(1);
     }
+    if (mode === "multi" && localState.players[1]?.teleport && b1.teleport && e.code === b1.teleport && !e.repeat) {
+      triggerTeleportLocal(1);
+    }
     if (e.code === p0FireKey() && !visualState[0].charging) {
-      if (Date.now() >= roundLockUntil) {
+      if (Date.now() >= roundLockUntil && !playerInEnemyFire(0)) {
         const p0 = localState.players[0];
         const a0 = p0.orbAmmo != null ? p0.orbAmmo : ORB_AMMO_PER_ROUND;
         if (p0.infiniteAmmo || a0 > 0) {
@@ -3754,7 +4757,7 @@ window.addEventListener("keydown", (e) => {
       }
     }
     if (mode === "multi" && e.code === p1FireKey() && !visualState[1].charging) {
-      if (Date.now() >= roundLockUntil) {
+      if (Date.now() >= roundLockUntil && !playerInEnemyFire(1)) {
         const pr = localState.players[1];
         const a1 = pr.orbAmmo != null ? pr.orbAmmo : ORB_AMMO_PER_ROUND;
         if (pr.infiniteAmmo || a1 > 0) {
@@ -3767,15 +4770,22 @@ window.addEventListener("keydown", (e) => {
   if (mode === "online" && socket && roomId) {
     const ok = onlineK();
     const controls = onlineControlsFromInput();
-    if (e.code === ok.melee && !e.repeat && !onlineIntermissionActive()) {
+    if (e.code === ok.melee && !e.repeat && !onlineIntermissionActive() && !playerInEnemyFire(playerIndex)) {
       if (triggerSwing(playerIndex)) socket.emit("match:input", onlineInputPayload("melee", controls));
     }
-    if (e.code === ok.orb && !onlineIntermissionActive()) {
+    if (e.code === ok.orb && !onlineIntermissionActive() && !playerInEnemyFire(playerIndex)) {
       visualState[playerIndex].charging = true;
       visualState[playerIndex].chargeKeyDownAt = Date.now();
       socket.emit("match:input", onlineInputPayload("chargeStart", controls));
     }
-    if (localState.players[playerIndex]?.fireBreath && ok.fire && e.code === ok.fire && !e.repeat && !onlineIntermissionActive()) {
+    if (
+      localState.players[playerIndex]?.fireBreath &&
+      ok.fire &&
+      e.code === ok.fire &&
+      !e.repeat &&
+      !onlineIntermissionActive() &&
+      !playerInEnemyFire(playerIndex)
+    ) {
       socket.emit("match:input", onlineInputPayload("fireStart", controls));
     }
     if (
@@ -3784,10 +4794,22 @@ window.addEventListener("keydown", (e) => {
       ok.groundPound &&
       e.code === ok.groundPound &&
       !e.repeat &&
-      !onlineIntermissionActive()
+      !onlineIntermissionActive() &&
+      !playerInEnemyFire(playerIndex)
     ) {
       triggerScreenShake();
       socket.emit("match:input", onlineInputPayload("groundPound", controls));
+    }
+    if (
+      localState.players[playerIndex]?.teleport &&
+      (localState.players[playerIndex]?.teleportUsesLeft || 0) > 0 &&
+      ok.teleport &&
+      e.code === ok.teleport &&
+      !e.repeat &&
+      !onlineIntermissionActive() &&
+      !playerInEnemyFire(playerIndex)
+    ) {
+      socket.emit("match:input", onlineInputPayload("teleport", controls));
     }
     socket.emit("match:input", onlineInputPayload(null, controls));
   }
@@ -3820,8 +4842,8 @@ window.addEventListener("keyup", (e) => {
         fireProjectile(1);
       }
     }
-    if (e.code === keyBindings.p0.fire) stopFireBreathLocal(0);
-    if (mode === "multi" && e.code === keyBindings.p1.fire) stopFireBreathLocal(1);
+    if (e.code === keyBindings.p0.fire) stopFireBreathLocal(0, true);
+    if (mode === "multi" && e.code === keyBindings.p1.fire) stopFireBreathLocal(1, true);
   }
   if (mode === "online" && socket && roomId) {
     const ok = onlineK();
@@ -4162,6 +5184,20 @@ function setupUI() {
   const buffOverlay = document.getElementById("buffPickOverlay");
   if (buffOverlay) {
     buffOverlay.addEventListener("click", (e) => {
+      const replaceBtn = e.target.closest("[data-replace-buff]");
+      if (replaceBtn) {
+        const replaceBuffId = replaceBtn.getAttribute("data-replace-buff");
+        if (!replaceBuffId || !pendingBuffReplace?.buffId) return;
+        pendingBuffReplace = { ...pendingBuffReplace, replaceBuffId };
+        applyBuffChoice(pendingBuffReplace.buffId);
+        return;
+      }
+      const cancelBtn = e.target.closest("[data-replace-cancel]");
+      if (cancelBtn) {
+        pendingBuffReplace = null;
+        showBuffPickOverlay(localState.buffPickLoser, localState.buffPickOptions);
+        return;
+      }
       const btn = e.target.closest("[data-buff]");
       if (!btn) return;
       applyBuffChoice(btn.getAttribute("data-buff"));
