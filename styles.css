@@ -729,11 +729,11 @@ button.lobby-decline {
 }
 
 .touch-joystick {
-  width: 92px;
-  height: 92px;
+  width: 128px;
+  height: 128px;
   border-radius: 50%;
-  border: 1px solid rgba(140, 170, 235, 0.7);
-  background: rgba(18, 28, 54, 0.58);
+  border: 2px solid rgba(170, 205, 255, 0.92);
+  background: rgba(18, 28, 54, 0.72);
   position: relative;
   touch-action: none;
   -webkit-touch-callout: none;
@@ -742,11 +742,11 @@ button.lobby-decline {
 }
 
 .touch-stick {
-  width: 42px;
-  height: 42px;
+  width: 58px;
+  height: 58px;
   border-radius: 50%;
-  background: rgba(126, 200, 255, 0.9);
-  border: 1px solid rgba(220, 240, 255, 0.9);
+  background: rgba(126, 220, 255, 0.95);
+  border: 2px solid rgba(235, 248, 255, 0.95);
   position: absolute;
   left: 50%;
   top: 50%;
@@ -756,10 +756,10 @@ button.lobby-decline {
 }
 
 .touch-btn {
-  min-width: 68px;
-  min-height: 52px;
-  border-radius: 12px;
-  border: 1px solid rgba(140, 170, 235, 0.7);
+  min-width: 82px;
+  min-height: 64px;
+  border-radius: 14px;
+  border: 2px solid rgba(160, 190, 245, 0.82);
   background: rgba(18, 28, 54, 0.78);
   color: #e8efff;
   font-size: 0.85rem;
@@ -776,7 +776,7 @@ button.lobby-decline {
 }
 
 .touch-btn--attack {
-  min-width: 92px;
+  min-width: 112px;
 }
 
 .touch-btn:active {
@@ -841,20 +841,24 @@ button.lobby-decline {
       max(10px, env(safe-area-inset-left));
   }
 
+  .touch-left {
+    margin-bottom: min(42px, 10dvh);
+  }
+
   .touch-joystick {
-    width: min(92px, 24dvh);
-    height: min(92px, 24dvh);
+    width: min(128px, 30dvh);
+    height: min(128px, 30dvh);
   }
 
   .touch-stick {
-    width: min(42px, 11dvh);
-    height: min(42px, 11dvh);
+    width: min(58px, 14dvh);
+    height: min(58px, 14dvh);
   }
 
   .touch-btn {
-    min-width: min(92px, 22dvw);
-    min-height: min(52px, 15dvh);
-    padding: 6px 10px;
+    min-width: min(112px, 26dvw);
+    min-height: min(64px, 18dvh);
+    padding: 8px 12px;
   }
 }
 
@@ -873,16 +877,16 @@ button.lobby-decline {
   }
 
   .touch-joystick {
-    width: min(92px, 24dvw);
-    height: min(92px, 24dvw);
+    width: min(128px, 30dvw);
+    height: min(128px, 30dvw);
   }
 
   .touch-stick {
-    width: min(42px, 11dvw);
-    height: min(42px, 11dvw);
+    width: min(58px, 14dvw);
+    height: min(58px, 14dvw);
   }
 
   .touch-btn {
-    min-height: min(52px, 15dvw);
+    min-height: min(64px, 18dvw);
   }
 }

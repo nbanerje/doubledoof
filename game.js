@@ -72,7 +72,7 @@ function drawHealthBarHud(vc, x, y, hp, color, label, maxHp = DEFAULT_MAX_HP) {
 function drawOrbAmmoBarHud(vc, x, y, p, color, shortLabel) {
   const ammo = playerOrbAmmoDisplay(p);
   if (ammo === null) return;
-  const max = ORB_AMMO_PER_ROUND;
+  const max = playerAmmoMax(p);
   const bw = 260;
   const bh = 14;
   const padBottom = 22;
@@ -269,6 +269,7 @@ const HUD_FONT_TITLE = '600 17px "DM Sans", system-ui, sans-serif';
 const GRAVITY = 0.7;
 /** While charging in the air, gravity is multiplied by this (lower = floatier). */
 const CHARGE_AIR_GRAVITY_MULT = 0.26;
+const CHARGE_JUMP_HEIGHT_MULT = 0.72;
 const JUMP_VELOCITY = -12.5;
 /** No minimum hold before orb appears; shot power scales from first frame of hold. */
 const CHARGE_THRESHOLD_MS = 0;
@@ -299,33 +300,13 @@ const BUFF_POOL = [
   "ricochetOrb",
   "trapSeed",
   "echoSlash",
-  "fungalBloom",
-  "sporeDash",
-  "thornSkin",
-  "rootPrison",
-  "toxicBurst",
-  "adrenalBite",
-  "orbLeech",
-  "chainRot",
-  "phaseStep",
-  "gravityWell",
-  "overgrowthArmor",
-  "bloodPact",
-  "reboundGuard",
-  "ambushSeed",
-  "echoOrb",
-  "predatorInstinct",
-  "manaBattery",
-  "windCut",
-  "snapFreeze",
-  "lastStand",
 ];
 const BUFF_DEFS = {
-  triple: { name: "Triple shot", desc: "Each charged release fires 3 orbs", icon: "🔺" },
+  triple: { name: "Burst", desc: "+1 bullet per shot (fires in sequence)", icon: "🔺" },
   tank: { name: "Tank", desc: "+75 max HP for the match", icon: "🛡️" },
   power: { name: "Power", desc: "+35% damage for the match", icon: "⚡" },
   infiniteJumps: { name: "Sky", desc: "Unlimited mid-air jumps", icon: "🪽" },
-  infiniteAmmo: { name: "Bottomless", desc: "Infinite orb ammo", icon: "♾️" },
+  infiniteAmmo: { name: "Ammo+", desc: "+1 max ammo (stacks)", icon: "♾️" },
   instantMaxCharge: { name: "Overcharge", desc: "Shots are always full tier V", icon: "💥" },
   meleeLong: { name: "Duelist", desc: "Melee range and swing 2× longer", icon: "🗡️" },
   fireBreath: {
@@ -439,14 +420,18 @@ function pickRandomBuffTriplet(loserIdx) {
   shuffleInPlace(triplet);
   return { triplet, key: [...triplet].sort().join("|") };
 }
-const SWING_DURATION_MS = 200;
+const SWING_DURATION_MS = 160;
 /** Bat swing reach (shorter than before) */
 const MELEE_RANGE = 48;
 /** Horizontal push on defender when melee connects */
 const MELEE_KNOCKBACK_VX = 50;
-const STAFF_DAMAGE = 35;
+const STAFF_DAMAGE = 20;
 const STAFF_KNOCKBACK_VX = 70;
-const STAFF_COOLDOWN_MS = 700;
+const STAFF_COOLDOWN_MS = 500;
+const STAFF_SWING_DURATION_MS = 220;
+const SWORD_COOLDOWN_MS = 0;
+const STACK_COOLDOWN_REDUCTION_MULT = 0.9;
+const MIN_MELEE_COOLDOWN_MS = 150;
 const STAFF_SWING_FRAMES = 5;
 const STAFF_SWING_ANIM_SPEED = 2.5;
 const FIRE_BREATH_RANGE = PLAYER_BODY_W * 1.5;
@@ -489,11 +474,11 @@ const WINS_TO_END_MATCH = 10;
 const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
 /** Charged shots per fighter per round (each projectile counts; triple uses 3). */
-const ORB_AMMO_PER_ROUND = 10;
+const ORB_AMMO_PER_ROUND = 1;
 const AMMO_RELOAD_IDLE_MS = 5000;
-const AMMO_RELOAD_AMOUNT = 5;
+const AMMO_RELOAD_AMOUNT = 1;
 const POWER_BUFF_DAMAGE_MULT = 1.35;
-const CARD_LOADOUT_MAX = 5;
+const CARD_LOADOUT_MAX = 8;
 const FREEZE_HIT_ROOT_MS = 1600;
 const FREEZE_TRAIL_ORB_OFFSET = 26;
 const VAMP_SLASH_HEAL_FRAC = 0.3;
@@ -502,6 +487,10 @@ const HEAVY_LANDING_RANGE = 96;
 const HEAVY_LANDING_DAMAGE = 8;
 const HEAVY_LANDING_STACK_BONUS = 4;
 const HEAVY_LANDING_UPWARD_VY = -8;
+const HEAVY_LANDING_GRAVITY_MULT = 1.45;
+const HEAVY_LANDING_STACK_GRAVITY_BONUS = 0.12;
+const HEAVY_LANDING_SHAKE_MS = 320;
+const HEAVY_LANDING_SHAKE_AMPLITUDE = 11;
 const SECOND_WIND_HP_THRESHOLD = 0.35;
 const SECOND_WIND_SPEED_BONUS = 0.25;
 const SECOND_WIND_DAMAGE_BONUS = 0.2;
@@ -555,7 +544,7 @@ const DRAGON_RUN_URLS = [
   "./assets/dragon-run-3.png?v=4",
   "./assets/dragon-run-4.png?v=4",
 ];
-const FUNUS_IDLE_URL = "./assets/funus_idle_1.png";
+const FUNUS_IDLE_URL = "./assets/funus_idle_4.png";
 const FUNUS_RUN_URLS = [
   "./assets/funus_run_1.png",
   "./assets/funus_run_2.png",
@@ -1468,15 +1457,15 @@ function weaponStatsForId(id) {
       damage: STAFF_DAMAGE,
       knockback: STAFF_KNOCKBACK_VX,
       cooldownMs: STAFF_COOLDOWN_MS,
-      swingDurationMs: STAFF_COOLDOWN_MS,
+      swingDurationMs: STAFF_SWING_DURATION_MS,
       frames: STAFF_SWING_FRAMES,
     };
   }
   return {
     id: "sword",
-    damage: 10,
+    damage: 7,
     knockback: MELEE_KNOCKBACK_VX,
-    cooldownMs: 0,
+    cooldownMs: SWORD_COOLDOWN_MS,
     swingDurationMs: SWING_DURATION_MS,
     frames: 0,
   };
@@ -2468,10 +2457,13 @@ function playerMaxHp(p) {
   return p.maxHealth != null ? p.maxHealth : DEFAULT_MAX_HP;
 }
 
+function playerAmmoMax(p) {
+  return Math.max(1, p.maxAmmo != null ? p.maxAmmo : ORB_AMMO_PER_ROUND);
+}
+
 function playerOrbAmmoDisplay(p) {
   if (mode === "online") return null;
-  if (p.infiniteAmmo) return ORB_AMMO_PER_ROUND;
-  return clamp(p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND, 0, ORB_AMMO_PER_ROUND);
+  return clamp(p.orbAmmo != null ? p.orbAmmo : playerAmmoMax(p), 0, playerAmmoMax(p));
 }
 
 /** 5 distinct tiers: higher ratio = more charge. Colors read clearly in-game. */
@@ -2545,6 +2537,7 @@ function drawChargeOrb(p, playerIdx) {
 }
 
 function drawProjectile(s) {
+  if ((s.dormantUntil || 0) > Date.now()) return;
   if (s.trapSeedSpot) {
     const x = Math.floor(s.x);
     const y = Math.floor(s.y);
@@ -2692,8 +2685,8 @@ function applyTouchInput() {
     if (touchState.orb && !touchState.prevOrb && !visualState[0].charging) {
       if (Date.now() >= roundLockUntil && !playerInEnemyFire(0)) {
         const p0 = localState.players[0];
-        const a0 = p0.orbAmmo != null ? p0.orbAmmo : ORB_AMMO_PER_ROUND;
-        if (p0.infiniteAmmo || a0 > 0) {
+        const a0 = p0.orbAmmo != null ? p0.orbAmmo : playerAmmoMax(p0);
+        if (a0 > 0) {
           p0.chargeStartAt = Date.now();
           visualState[0].charging = true;
         }
@@ -3200,22 +3193,22 @@ function spawnFireBreathBurst(attackerIdx) {
 }
 
 function tryJump(idx, code) {
-  if (visualState[idx].charging) return;
   const p = localState.players[idx];
   if ((p.freezeRootUntil || 0) > Date.now()) return;
   const now = performance.now();
   const prev = keyTimes.get(code) || 0;
   keyTimes.set(code, now);
   const boosted = now - prev < 260;
+  const jumpMult = visualState[idx].charging ? CHARGE_JUMP_HEIGHT_MULT : 1;
   if (p.infiniteJumps) {
     const jm = 1 + 0.06 * (p.skyJumpStacks || 0);
-    p.vy = JUMP_VELOCITY * jm * (boosted ? 1.12 : 1);
+    p.vy = JUMP_VELOCITY * jm * (boosted ? 1.12 : 1) * jumpMult;
     p.onGround = false;
     p.jumpsUsed = Math.min(p.jumpsUsed + 1, 9);
     return;
   }
   if (p.onGround || p.jumpsUsed < 2) {
-    p.vy = JUMP_VELOCITY * (boosted ? 1.12 : 1);
+    p.vy = JUMP_VELOCITY * (boosted ? 1.12 : 1) * jumpMult;
     p.onGround = false;
     p.jumpsUsed += 1;
   }
@@ -3226,14 +3219,16 @@ function doMelee(attackerIdx) {
   const attacker = localState.players[attackerIdx];
   const t0 = Date.now();
   const weaponStats = weaponStatsForId(selectedWeaponForPlayer(attackerIdx, attacker));
+  const cdMult = attacker.meleeCooldownMult != null ? attacker.meleeCooldownMult : 1;
+  const cooldownMs = Math.max(MIN_MELEE_COOLDOWN_MS, Math.round(weaponStats.cooldownMs * cdMult));
   const v = visualState[attackerIdx];
-  if (weaponStats.cooldownMs > 0 && t0 < (v.nextMeleeAt || 0)) return false;
+  if (cooldownMs > 0 && t0 < (v.nextMeleeAt || 0)) return false;
   const dur = Math.round(weaponStats.swingDurationMs * (attacker.meleeSwingScale != null ? attacker.meleeSwingScale : 1));
   visualState[attackerIdx].attackStartAt = t0;
   visualState[attackerIdx].attackUntil = t0 + dur;
   visualState[attackerIdx].swingDurationMs = dur;
   visualState[attackerIdx].meleeDealt = false;
-  visualState[attackerIdx].nextMeleeAt = t0 + weaponStats.cooldownMs;
+  visualState[attackerIdx].nextMeleeAt = t0 + (weaponStats.id === "staff" ? dur + cooldownMs : cooldownMs);
   return true;
 }
 
@@ -3241,14 +3236,16 @@ function triggerSwing(idx) {
   const p = localState.players[idx];
   const t0 = Date.now();
   const weaponStats = weaponStatsForId(selectedWeaponForPlayer(idx, p));
+  const cdMult = p.meleeCooldownMult != null ? p.meleeCooldownMult : 1;
+  const cooldownMs = Math.max(MIN_MELEE_COOLDOWN_MS, Math.round(weaponStats.cooldownMs * cdMult));
   const v = visualState[idx];
-  if (weaponStats.cooldownMs > 0 && t0 < (v.nextMeleeAt || 0)) return false;
+  if (cooldownMs > 0 && t0 < (v.nextMeleeAt || 0)) return false;
   const dur = Math.round(weaponStats.swingDurationMs * (p.meleeSwingScale != null ? p.meleeSwingScale : 1));
   visualState[idx].attackStartAt = t0;
   visualState[idx].attackUntil = t0 + dur;
   visualState[idx].swingDurationMs = dur;
   visualState[idx].meleeDealt = false;
-  visualState[idx].nextMeleeAt = t0 + weaponStats.cooldownMs;
+  visualState[idx].nextMeleeAt = t0 + (weaponStats.id === "staff" ? dur + cooldownMs : cooldownMs);
   return true;
 }
 
@@ -3272,9 +3269,10 @@ function fireProjectile(attackerIdx, override = null) {
   if (Date.now() < roundLockUntil) return;
   if (playerInEnemyFire(attackerIdx)) return;
   const attacker = localState.players[attackerIdx];
-  const orbCost = attacker.tripleShot ? 3 : 1;
-  const ammo = attacker.orbAmmo != null ? attacker.orbAmmo : ORB_AMMO_PER_ROUND;
-  if (!attacker.infiniteAmmo && ammo < orbCost) return;
+  const orbCost = 1;
+  const ammoMax = playerAmmoMax(attacker);
+  const ammo = attacker.orbAmmo != null ? attacker.orbAmmo : ammoMax;
+  if (ammo < orbCost) return;
   let damage;
   let w;
   let h;
@@ -3307,15 +3305,14 @@ function fireProjectile(attackerIdx, override = null) {
     ? 1 + SECOND_WIND_DAMAGE_BONUS + Math.max(0, secondWindTier - 1) * SECOND_WIND_STACK_BONUS
     : 1;
   const instBonus = attacker.instantMaxCharge ? attacker.instantChargeBonusDmg || 0 : 0;
-  const tripleBonus = attacker.tripleShot ? attacker.tripleDamageBonus || 0 : 0;
-  const dmg = Math.round(damage * mult * secondWindMult) + instBonus + tripleBonus;
+  const dmg = Math.round(damage * mult * secondWindMult) + instBonus;
   const freezeBonus = attacker.freezeRootBonusMs || 0;
   const freezeTriangleUntil = attacker.freezeShot ? Date.now() + FREEZE_HIT_ROOT_MS + freezeBonus : 0;
   const freezeRootMs = attacker.freezeShot ? FREEZE_HIT_ROOT_MS + freezeBonus : 0;
   const cy = attacker.y + Math.floor(PLAYER_BODY_H * 0.42) + (6 - h) / 2;
   const baseX = attacker.x + Math.floor(PLAYER_BODY_W * 0.62) + 2;
   const target = attackerIdx === 0 ? 1 : 0;
-  const pushShot = (vx, vy, xOffset = 0) => {
+  const pushShot = (vx, vy, xOffset = 0, delayMs = 0) => {
     localState.projectiles.push({
       x: baseX + xOffset,
       y: cy,
@@ -3328,28 +3325,18 @@ function fireProjectile(attackerIdx, override = null) {
       freezeTriangleUntil,
       freezeRootMs,
       ricochetLeft: attacker.ricochetOrb ? 1 + Math.max(0, (attacker.ricochetOrbTier || 1) - 1) : 0,
+      dormantUntil: delayMs > 0 ? Date.now() + delayMs : 0,
     });
   };
-  if (attacker.tripleShot) {
-    const fac = attacker.facing;
-    const baseAng = fac === 1 ? 0 : Math.PI;
-    const spread = 0.17;
-    [-spread, 0, spread].forEach((da) => {
-      const ang = baseAng + da * fac;
-      pushShot(speed * Math.cos(ang), speed * Math.sin(ang));
-    });
-  } else {
-    pushShot(attacker.facing * speed, 0);
+  const burstCount = Math.max(1, attacker.burstCount || 1);
+  for (let i = 0; i < burstCount; i += 1) {
+    pushShot(attacker.facing * speed, 0, 0, i * 70);
   }
   if (attacker.freezeShot) {
     const dir = attacker.facing >= 0 ? 1 : -1;
     pushShot(attacker.facing * speed, 0, -dir * FREEZE_TRAIL_ORB_OFFSET);
   }
-  if (!attacker.infiniteAmmo) {
-    attacker.orbAmmo = ammo - orbCost;
-  } else {
-    attacker.orbAmmo = ORB_AMMO_PER_ROUND;
-  }
+  attacker.orbAmmo = ammo - orbCost;
   attacker.lastShotAt = Date.now();
   visualState[attackerIdx].shootFlashUntil = Date.now() + 120;
 }
@@ -3376,9 +3363,11 @@ function clearCombatBuffsFromPlayers() {
   for (const p of localState.players) {
     delete p.maxHealth;
     delete p.tripleShot;
+    delete p.burstCount;
     delete p.damageMult;
     delete p.infiniteJumps;
     delete p.infiniteAmmo;
+    delete p.maxAmmo;
     delete p.instantMaxCharge;
     delete p.meleeRangeScale;
     delete p.meleeSwingScale;
@@ -3445,6 +3434,7 @@ function clearCombatBuffsFromPlayers() {
     delete p.lastStandTier;
     delete p.lastStandUsedRound;
     delete p.cardLoadout;
+    delete p.meleeCooldownMult;
   }
 }
 
@@ -3767,8 +3757,7 @@ function ensurePlayerCardLoadout(p) {
 
 function removeBuffEffectsFromPlayer(p, buffId) {
   if (buffId === "triple") {
-    delete p.tripleShot;
-    delete p.tripleDamageBonus;
+    delete p.burstCount;
   } else if (buffId === "tank") {
     delete p.maxHealth;
     p.health = clamp(p.health, 0, playerMaxHp(p));
@@ -3778,7 +3767,7 @@ function removeBuffEffectsFromPlayer(p, buffId) {
     delete p.infiniteJumps;
     delete p.skyJumpStacks;
   } else if (buffId === "infiniteAmmo") {
-    delete p.infiniteAmmo;
+    delete p.maxAmmo;
   } else if (buffId === "instantMaxCharge") {
     delete p.instantMaxCharge;
     delete p.instantChargeBonusDmg;
@@ -3870,6 +3859,7 @@ function removeBuffEffectsFromPlayer(p, buffId) {
     delete p.lastStandTier;
     delete p.lastStandUsedRound;
   }
+  delete p.meleeCooldownMult;
 }
 
 function buffIcon(id) {
@@ -3899,11 +3889,7 @@ function applyOrUpgradeBuffToPlayer(L, loserIdx, buffId, replaceBuffId = null) {
       L.fireBreathTier = 1;
     }
   } else if (buffId === "triple") {
-    if (L.tripleShot) {
-      L.tripleDamageBonus = (L.tripleDamageBonus || 0) + 4;
-    } else {
-      L.tripleShot = true;
-    }
+    L.burstCount = Math.max(1, (L.burstCount || 1) + 1);
   } else if (buffId === "tank") {
     const base = L.maxHealth != null && L.maxHealth > 0 ? L.maxHealth : 100;
     L.maxHealth = base + TANK_BUFF_HP_PER_PICK;
@@ -3917,14 +3903,8 @@ function applyOrUpgradeBuffToPlayer(L, loserIdx, buffId, replaceBuffId = null) {
       L.infiniteJumps = true;
     }
   } else if (buffId === "infiniteAmmo") {
-    if (L.infiniteAmmo) {
-      const cap = ORB_AMMO_PER_ROUND + 15;
-      const cur = L.orbAmmo != null ? L.orbAmmo : ORB_AMMO_PER_ROUND;
-      L.orbAmmo = Math.min(cap, cur + 5);
-    } else {
-      L.infiniteAmmo = true;
-      L.orbAmmo = ORB_AMMO_PER_ROUND;
-    }
+    L.maxAmmo = Math.max(1, (L.maxAmmo || ORB_AMMO_PER_ROUND) + 1);
+    L.orbAmmo = Math.min(playerAmmoMax(L), (L.orbAmmo != null ? L.orbAmmo : 0) + 1);
   } else if (buffId === "instantMaxCharge") {
     if (L.instantMaxCharge) {
       L.instantChargeBonusDmg = (L.instantChargeBonusDmg || 0) + 4;
@@ -4053,7 +4033,12 @@ function applyOrUpgradeBuffToPlayer(L, loserIdx, buffId, replaceBuffId = null) {
   } else {
     return { ok: false, reason: "invalid" };
   }
-  if (!hadBuff) ensurePlayerCardLoadout(L).push(buffId);
+  if (hadBuff) {
+    const cur = L.meleeCooldownMult != null ? L.meleeCooldownMult : 1;
+    L.meleeCooldownMult = Math.max(0.2, cur * STACK_COOLDOWN_REDUCTION_MULT);
+  } else {
+    ensurePlayerCardLoadout(L).push(buffId);
+  }
   return { ok: true };
 }
 
@@ -4088,28 +4073,10 @@ function applyBuffChoice(buffId) {
   }
 
   if (mode === "online") {
-    const me = localState.players[playerIndex];
     const replaceBuffId = pendingBuffReplace?.buffId === buffId ? pendingBuffReplace.replaceBuffId || null : null;
-    const hadFireBreath = !!me?.fireBreath;
-    const hadGroundPound = !!me?.groundPound;
-    const hadTeleport = !!me?.teleport;
     if (socket && roomId) socket.emit("buff:pick", { buffId, replaceBuffId });
-    localState.buffPickActive = false;
+    // Keep overlay until server confirms via match:state. Prevents UI desync on rejected picks.
     pendingBuffReplace = null;
-    hideBuffPickOverlay();
-    if (buffId === "fireBreath" && !hadFireBreath) {
-      startFireBreathKeyBind(playerIndex, true, () => {
-        if (socket && roomId) socket.emit("fire:bind:done");
-      });
-    } else if (buffId === "groundPound" && !hadGroundPound) {
-      startGroundPoundKeyBind(playerIndex, true, () => {
-        if (socket && roomId) socket.emit("ground:bind:done");
-      });
-    } else if (buffId === "teleport" && !hadTeleport) {
-      startTeleportKeyBind(playerIndex, true, () => {
-        if (socket && roomId) socket.emit("teleport:bind:done");
-      });
-    }
     return;
   }
   const win = loser === 0 ? 1 : 0;
@@ -4166,7 +4133,7 @@ function showBuffReplaceChoices(loserIdx, pickedBuffId) {
   if (!btnWrap || !wrap || owned.length === 0) return;
   if (gate) gate.classList.add("hidden");
   if (title) title.textContent = `Replace a card for ${BUFF_DEFS[pickedBuffId]?.name || "new card"}`;
-  if (sub) sub.textContent = "Loadout full (5/5). Pick one card to replace.";
+  if (sub) sub.textContent = "Loadout full (8/8). Pick one card to replace.";
   btnWrap.innerHTML = "";
   for (const id of owned) {
     const d = BUFF_DEFS[id];
@@ -4288,12 +4255,12 @@ function updateLocalGame() {
   // Guard against missed keyup when focus changes.
   const now = Date.now();
   for (const p of localState.players) {
-    if (p.infiniteAmmo) continue;
-    const ammo = p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND;
-    if (ammo >= ORB_AMMO_PER_ROUND) continue;
+    const maxAmmo = playerAmmoMax(p);
+    const ammo = p.orbAmmo != null ? p.orbAmmo : maxAmmo;
+    if (ammo >= maxAmmo) continue;
     const lastShotAt = p.lastShotAt || 0;
     if (now - lastShotAt >= AMMO_RELOAD_IDLE_MS) {
-      p.orbAmmo = Math.min(ORB_AMMO_PER_ROUND, ammo + AMMO_RELOAD_AMOUNT);
+      p.orbAmmo = Math.min(maxAmmo, ammo + AMMO_RELOAD_AMOUNT);
       p.lastShotAt = now;
     }
   }
@@ -4362,9 +4329,8 @@ function updateLocalGame() {
     if (Math.abs(d) < MELEE_RANGE + 12 && Math.random() < 0.02) doMelee(1);
     if (Math.abs(d) > 140 && Math.random() < 0.01) {
       const p2c = localState.players[1];
-      const cost = p2c.tripleShot ? 3 : 1;
-      const am = p2c.orbAmmo != null ? p2c.orbAmmo : ORB_AMMO_PER_ROUND;
-      if (am >= cost || p2c.infiniteAmmo) {
+      const am = p2c.orbAmmo != null ? p2c.orbAmmo : playerAmmoMax(p2c);
+      if (am >= 1) {
         p2c.chargeStartAt = Date.now() - CHARGE_THRESHOLD_MS - CHARGE_SCALE_MS * 0.35;
         fireProjectile(1);
       }
@@ -4381,7 +4347,11 @@ function updateLocalGame() {
     const wasOnGround = !!p.onGround;
     const previousBottom = p.y + PLAYER_BODY_H;
     const slowFall = visualState[pi].charging && !p.onGround;
-    p.vy += GRAVITY * (slowFall ? CHARGE_AIR_GRAVITY_MULT : 1);
+    const heavyLandingFallMult =
+      p.heavyLanding && !p.onGround
+        ? HEAVY_LANDING_GRAVITY_MULT + Math.max(0, (p.heavyLandingTier || 1) - 1) * HEAVY_LANDING_STACK_GRAVITY_BONUS
+        : 1;
+    p.vy += GRAVITY * (slowFall ? CHARGE_AIR_GRAVITY_MULT : 1) * heavyLandingFallMult;
     p.x = clamp(p.x + p.vx, 0, VIEW_W - PLAYER_BODY_W);
     p.y += p.vy;
     const bottom = p.y + PLAYER_BODY_H;
@@ -4414,9 +4384,13 @@ function updateLocalGame() {
     if (!wasOnGround && p.onGround && p.heavyLanding) {
       const enemyIdx = 1 - pi;
       const enemy = localState.players[enemyIdx];
+      const tier = p.heavyLandingTier || 1;
+      triggerScreenShake(
+        HEAVY_LANDING_SHAKE_MS + Math.max(0, tier - 1) * 35,
+        HEAVY_LANDING_SHAKE_AMPLITUDE + Math.max(0, tier - 1) * 1.5
+      );
       const dx = Math.abs((enemy.x + PLAYER_BODY_W / 2) - (p.x + PLAYER_BODY_W / 2));
       if (dx <= HEAVY_LANDING_RANGE) {
-        const tier = p.heavyLandingTier || 1;
         const dmg = HEAVY_LANDING_DAMAGE + Math.max(0, tier - 1) * HEAVY_LANDING_STACK_BONUS;
         enemy.health = clamp(enemy.health - dmg, 0, playerMaxHp(enemy));
         enemy.vy = Math.min(enemy.vy || 0, HEAVY_LANDING_UPWARD_VY);
@@ -4432,6 +4406,7 @@ function updateLocalGame() {
   processBurnDamage();
 
   localState.projectiles.forEach((shot) => {
+    if ((shot.dormantUntil || 0) > Date.now()) return;
     if (shot.trapSeedSpot) {
       if ((shot.expiresAt || 0) <= Date.now()) {
         shot.dead = true;
@@ -4540,8 +4515,8 @@ function updateLocalGame() {
     p1.y = FLOOR_Y - PLAYER_BODY_H;
     p2.y = FLOOR_Y - PLAYER_BODY_H;
     p1.vx = p2.vx = p1.vy = p2.vy = 0;
-    p1.orbAmmo = ORB_AMMO_PER_ROUND;
-    p2.orbAmmo = ORB_AMMO_PER_ROUND;
+    p1.orbAmmo = playerAmmoMax(p1);
+    p2.orbAmmo = playerAmmoMax(p2);
     p1.fireBreathing = false;
     p2.fireBreathing = false;
     p1.fireStartAt = 0;
@@ -4567,7 +4542,7 @@ function updateLocalGame() {
     if (p1.trapSeed) p1.trapSeedUsesLeft = 2 + Math.max(0, (p1.trapSeedTier || 1) - 1);
     if (p2.trapSeed) p2.trapSeedUsesLeft = 2 + Math.max(0, (p2.trapSeedTier || 1) - 1);
     localState.projectiles = [];
-    if (!matchOver && mode !== "single") {
+    if (!matchOver) {
       localState.buffPickLoser = loser;
       localState.buffPickActive = true;
       showBuffPickOverlay(loser);
@@ -4924,8 +4899,8 @@ window.addEventListener("keydown", (e) => {
     if (e.code === p0FireKey() && !visualState[0].charging) {
       if (Date.now() >= roundLockUntil && !playerInEnemyFire(0)) {
         const p0 = localState.players[0];
-        const a0 = p0.orbAmmo != null ? p0.orbAmmo : ORB_AMMO_PER_ROUND;
-        if (p0.infiniteAmmo || a0 > 0) {
+        const a0 = p0.orbAmmo != null ? p0.orbAmmo : playerAmmoMax(p0);
+        if (a0 > 0) {
           p0.chargeStartAt = Date.now();
           visualState[0].charging = true;
         }
@@ -4934,8 +4909,8 @@ window.addEventListener("keydown", (e) => {
     if (mode === "multi" && e.code === p1FireKey() && !visualState[1].charging) {
       if (Date.now() >= roundLockUntil && !playerInEnemyFire(1)) {
         const pr = localState.players[1];
-        const a1 = pr.orbAmmo != null ? pr.orbAmmo : ORB_AMMO_PER_ROUND;
-        if (pr.infiniteAmmo || a1 > 0) {
+        const a1 = pr.orbAmmo != null ? pr.orbAmmo : playerAmmoMax(pr);
+        if (a1 > 0) {
           pr.chargeStartAt = Date.now();
           visualState[1].charging = true;
         }
@@ -5036,6 +5011,7 @@ window.addEventListener("keyup", (e) => {
 });
 
 window.addEventListener("blur", resetInputState);
+window.addEventListener("pagehide", resetInputState);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) resetInputState();
 });
@@ -5049,6 +5025,28 @@ function installMobileZoomGuards() {
   document.addEventListener("gesturestart", preventGesture, { passive: false });
   document.addEventListener("gesturechange", preventGesture, { passive: false });
   document.addEventListener("gestureend", preventGesture, { passive: false });
+  document.addEventListener(
+    "touchmove",
+    (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (!target) return;
+      const inGameSurface = !!target.closest("#gameCanvas, .touch-overlay, .game-wrap");
+      if (!inGameSurface) return;
+      // Prevent Safari viewport scroll / pull-to-refresh while controlling the game.
+      e.preventDefault();
+    },
+    { passive: false, capture: true }
+  );
+  document.addEventListener(
+    "contextmenu",
+    (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (target && target.closest("#gameCanvas, .touch-overlay, .game-wrap")) {
+        e.preventDefault();
+      }
+    },
+    { capture: true }
+  );
   document.addEventListener(
     "dblclick",
     (e) => {
@@ -5102,8 +5100,13 @@ function setupUI() {
     });
 
     if (touchJoystickEl) {
-      const JOY_RADIUS = 34;
+      const JOY_RADIUS = 52;
+      const JOY_DEADZONE = 0.2;
+      const JOY_MOVE_THRESHOLD = 0.32;
+      const JOY_JUMP_THRESHOLD = 0.46;
+      let activeStickPointerId = null;
       const resetStick = () => {
+        activeStickPointerId = null;
         touchState.left = false;
         touchState.right = false;
         touchState.jumpFromStick = false;
@@ -5122,22 +5125,53 @@ function setupUI() {
         if (touchStickEl) {
           touchStickEl.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
         }
-        touchState.left = clampedX < -10;
-        touchState.right = clampedX > 10;
-        touchState.jumpFromStick = clampedY < -14;
+        const nx = clampedX / JOY_RADIUS;
+        const ny = clampedY / JOY_RADIUS;
+        const mag = Math.hypot(nx, ny);
+        if (mag < JOY_DEADZONE) {
+          touchState.left = false;
+          touchState.right = false;
+          touchState.jumpFromStick = false;
+          return;
+        }
+        // Remap after deadzone so movement comes on smoothly.
+        const scaled = Math.min(1, (mag - JOY_DEADZONE) / (1 - JOY_DEADZONE));
+        const sx = (nx / mag) * scaled;
+        const sy = (ny / mag) * scaled;
+        touchState.left = sx < -JOY_MOVE_THRESHOLD;
+        touchState.right = sx > JOY_MOVE_THRESHOLD;
+        touchState.jumpFromStick = sy < -JOY_JUMP_THRESHOLD;
       };
       touchJoystickEl.addEventListener("pointerdown", (e) => {
         e.preventDefault();
+        activeStickPointerId = e.pointerId;
+        if (typeof touchJoystickEl.setPointerCapture === "function") {
+          touchJoystickEl.setPointerCapture(e.pointerId);
+        }
         moveStick(e.clientX, e.clientY);
       });
       touchJoystickEl.addEventListener("pointermove", (e) => {
-        if ((e.buttons & 1) === 0) return;
+        if (activeStickPointerId !== e.pointerId) return;
         e.preventDefault();
         moveStick(e.clientX, e.clientY);
       });
-      touchJoystickEl.addEventListener("pointerup", resetStick);
-      touchJoystickEl.addEventListener("pointercancel", resetStick);
-      touchJoystickEl.addEventListener("pointerleave", resetStick);
+      touchJoystickEl.addEventListener("pointerup", (e) => {
+        if (activeStickPointerId !== e.pointerId) return;
+        if (typeof touchJoystickEl.releasePointerCapture === "function") {
+          try {
+            touchJoystickEl.releasePointerCapture(e.pointerId);
+          } catch {}
+        }
+        resetStick();
+      });
+      touchJoystickEl.addEventListener("pointercancel", (e) => {
+        if (activeStickPointerId !== e.pointerId) return;
+        resetStick();
+      });
+      touchJoystickEl.addEventListener("pointerleave", (e) => {
+        if (activeStickPointerId !== e.pointerId) return;
+        resetStick();
+      });
     }
   }
 

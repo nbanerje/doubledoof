@@ -26,15 +26,19 @@ const MAX_CHARGE_MS = 12000;
 const CHARGE_SCALE_MS = 3200;
 const MELEE_RANGE = 48;
 const MELEE_KNOCKBACK_PX = 50;
-const STAFF_DAMAGE = 35;
+const STAFF_DAMAGE = 20;
 const STAFF_KNOCKBACK_PX = 70;
-const STAFF_COOLDOWN_MS = 1000;
+const STAFF_COOLDOWN_MS = 500;
+const STAFF_SWING_DURATION_MS = 220;
+const SWORD_COOLDOWN_MS = 0;
+const STACK_COOLDOWN_REDUCTION_MULT = 0.9;
+const MIN_MELEE_COOLDOWN_MS = 150;
 const WINS_TO_END_MATCH = 10;
 const ORB_DAMAGE_MIN = 6;
 const ORB_DAMAGE_RANGE = 26;
-const ORB_AMMO_PER_ROUND = 10;
+const ORB_AMMO_PER_ROUND = 1;
 const AMMO_RELOAD_IDLE_MS = 5000;
-const AMMO_RELOAD_AMOUNT = 5;
+const AMMO_RELOAD_AMOUNT = 1;
 const FREEZE_HIT_ROOT_MS = 1600;
 const FREEZE_TRAIL_ORB_OFFSET = 26;
 const CHEAT_BLUE_MELEE_BURST_DAMAGE = 1000;
@@ -47,6 +51,7 @@ const PLAYER_BODY_H = 48;
 const PLAYER_TOP_Y = FLOOR_Y - PLAYER_BODY_H;
 const GRAVITY = 0.7;
 const CHARGE_AIR_GRAVITY_MULT = 0.26;
+const CHARGE_JUMP_HEIGHT_MULT = 0.72;
 const JUMP_VELOCITY = -12.5;
 const POWER_BUFF_DAMAGE_MULT = 1.35;
 const TANK_BUFF_HP_PER_PICK = 75;
@@ -69,26 +74,6 @@ const BUFF_POOL = [
   "ricochetOrb",
   "trapSeed",
   "echoSlash",
-  "fungalBloom",
-  "sporeDash",
-  "thornSkin",
-  "rootPrison",
-  "toxicBurst",
-  "adrenalBite",
-  "orbLeech",
-  "chainRot",
-  "phaseStep",
-  "gravityWell",
-  "overgrowthArmor",
-  "bloodPact",
-  "reboundGuard",
-  "ambushSeed",
-  "echoOrb",
-  "predatorInstinct",
-  "manaBattery",
-  "windCut",
-  "snapFreeze",
-  "lastStand",
 ];
 /** Fire Breath is much more likely when the loser is Dragon (matches client bias). */
 const BUFF_DRAGON_FIRE_BREATH_PICK_WEIGHT = 8;
@@ -131,6 +116,8 @@ const HEAVY_LANDING_RANGE = 96;
 const HEAVY_LANDING_DAMAGE = 8;
 const HEAVY_LANDING_STACK_BONUS = 4;
 const HEAVY_LANDING_UPWARD_VY = -8;
+const HEAVY_LANDING_GRAVITY_MULT = 1.45;
+const HEAVY_LANDING_STACK_GRAVITY_BONUS = 0.12;
 const SECOND_WIND_HP_THRESHOLD = 0.35;
 const SECOND_WIND_SPEED_BONUS = 0.25;
 const SECOND_WIND_DAMAGE_BONUS = 0.2;
@@ -139,7 +126,7 @@ const TRAP_SEED_ROOT_MS = 1200;
 const TRAP_SEED_STACK_BONUS_MS = 500;
 const ECHO_SLASH_BONUS_FRAC = 0.5;
 const ECHO_SLASH_STACK_BONUS_FRAC = 0.15;
-const CARD_LOADOUT_MAX = 5;
+const CARD_LOADOUT_MAX = 8;
 const LEVEL_PLATFORMS = [
   [
     { x: 140, y: 490, w: 180, h: 14 },
@@ -207,7 +194,7 @@ function weaponStatsForId(id) {
   if (id === "staff") {
     return { id: "staff", damage: STAFF_DAMAGE, knockback: STAFF_KNOCKBACK_PX, cooldownMs: STAFF_COOLDOWN_MS };
   }
-  return { id: "sword", damage: 10, knockback: MELEE_KNOCKBACK_PX, cooldownMs: 0 };
+  return { id: "sword", damage: 7, knockback: MELEE_KNOCKBACK_PX, cooldownMs: SWORD_COOLDOWN_MS };
 }
 
 function normalizeLevelIndex(idx) {
@@ -306,6 +293,10 @@ function playerMaxHp(p) {
   return p.maxHealth != null && p.maxHealth > 0 ? p.maxHealth : 100;
 }
 
+function playerAmmoMax(p) {
+  return Math.max(1, p.maxAmmo != null ? p.maxAmmo : ORB_AMMO_PER_ROUND);
+}
+
 function secondWindDamageMultiplier(p) {
   if (!p?.secondWind) return 1;
   const hp = playerMaxHp(p);
@@ -321,8 +312,7 @@ function ensurePlayerCardLoadout(player) {
 
 function removeBuffEffectsFromPlayer(player, buffId) {
   if (buffId === "triple") {
-    delete player.tripleShot;
-    delete player.tripleDamageBonus;
+    delete player.burstCount;
   } else if (buffId === "tank") {
     delete player.maxHealth;
     player.health = Math.min(player.health, playerMaxHp(player));
@@ -332,7 +322,7 @@ function removeBuffEffectsFromPlayer(player, buffId) {
     delete player.infiniteJumps;
     delete player.skyJumpStacks;
   } else if (buffId === "infiniteAmmo") {
-    delete player.infiniteAmmo;
+    delete player.maxAmmo;
   } else if (buffId === "instantMaxCharge") {
     delete player.instantMaxCharge;
     delete player.instantChargeBonusDmg;
@@ -424,6 +414,7 @@ function removeBuffEffectsFromPlayer(player, buffId) {
     delete player.lastStandTier;
     delete player.lastStandUsedRound;
   }
+  delete player.meleeCooldownMult;
 }
 
 function pickRandomBuffTripletServer(lastKey, loserPlayer) {
@@ -494,11 +485,7 @@ function applyBuffToPlayerOnline(player, buffId, replaceBuffId = null) {
       player.fireBreathTier = 1;
     }
   } else if (buffId === "triple") {
-    if (player.tripleShot) {
-      player.tripleDamageBonus = (player.tripleDamageBonus || 0) + 4;
-    } else {
-      player.tripleShot = true;
-    }
+    player.burstCount = Math.max(1, (player.burstCount || 1) + 1);
   } else if (buffId === "tank") {
     const base = player.maxHealth != null && player.maxHealth > 0 ? player.maxHealth : 100;
     player.maxHealth = base + TANK_BUFF_HP_PER_PICK;
@@ -512,14 +499,8 @@ function applyBuffToPlayerOnline(player, buffId, replaceBuffId = null) {
       player.infiniteJumps = true;
     }
   } else if (buffId === "infiniteAmmo") {
-    if (player.infiniteAmmo) {
-      const cap = ORB_AMMO_PER_ROUND + 15;
-      const cur = player.orbAmmo != null ? player.orbAmmo : ORB_AMMO_PER_ROUND;
-      player.orbAmmo = Math.min(cap, cur + 5);
-    } else {
-      player.infiniteAmmo = true;
-      player.orbAmmo = ORB_AMMO_PER_ROUND;
-    }
+    player.maxAmmo = Math.max(1, (player.maxAmmo || ORB_AMMO_PER_ROUND) + 1);
+    player.orbAmmo = Math.min(playerAmmoMax(player), (player.orbAmmo != null ? player.orbAmmo : 0) + 1);
   } else if (buffId === "instantMaxCharge") {
     if (player.instantMaxCharge) {
       player.instantChargeBonusDmg = (player.instantChargeBonusDmg || 0) + 4;
@@ -647,7 +628,12 @@ function applyBuffToPlayerOnline(player, buffId, replaceBuffId = null) {
   } else {
     return { ok: false, reason: "invalid" };
   }
-  if (!hadBuff) ensurePlayerCardLoadout(player).push(buffId);
+  if (hadBuff) {
+    const cur = player.meleeCooldownMult != null ? player.meleeCooldownMult : 1;
+    player.meleeCooldownMult = Math.max(0.2, cur * STACK_COOLDOWN_REDUCTION_MULT);
+  } else {
+    ensurePlayerCardLoadout(player).push(buffId);
+  }
   player.health = playerMaxHp(player);
   return { ok: true };
 }
@@ -1059,14 +1045,13 @@ function updateRoom(room) {
 
   for (let pi = 0; pi < room.players.length; pi += 1) {
     const p = room.players[pi];
-    if (!p.infiniteAmmo) {
-      const ammo = p.orbAmmo != null ? p.orbAmmo : ORB_AMMO_PER_ROUND;
-      if (ammo < ORB_AMMO_PER_ROUND) {
-        const lastShotAt = p.lastShotAt || 0;
-        if (now - lastShotAt >= AMMO_RELOAD_IDLE_MS) {
-          p.orbAmmo = Math.min(ORB_AMMO_PER_ROUND, ammo + AMMO_RELOAD_AMOUNT);
-          p.lastShotAt = now;
-        }
+    const ammoMax = playerAmmoMax(p);
+    const ammo = p.orbAmmo != null ? p.orbAmmo : ammoMax;
+    if (ammo < ammoMax) {
+      const lastShotAt = p.lastShotAt || 0;
+      if (now - lastShotAt >= AMMO_RELOAD_IDLE_MS) {
+        p.orbAmmo = Math.min(ammoMax, ammo + AMMO_RELOAD_AMOUNT);
+        p.lastShotAt = now;
       }
     }
     const left = !!p.controls.left;
@@ -1101,12 +1086,13 @@ function updateRoom(room) {
       p.facing = 1;
     }
     if (!rooted && jump && !p.jumpHeld) {
+      const jumpMult = p.charging ? CHARGE_JUMP_HEIGHT_MULT : 1;
       if (p.infiniteJumps) {
-        p.vy = JUMP_VELOCITY;
+        p.vy = JUMP_VELOCITY * jumpMult;
         p.onGround = false;
         p.jumpsUsed = Math.min((p.jumpsUsed || 0) + 1, 9);
       } else if (p.onGround || (p.jumpsUsed || 0) < 2) {
-        p.vy = JUMP_VELOCITY;
+        p.vy = JUMP_VELOCITY * jumpMult;
         p.onGround = false;
         p.jumpsUsed = (p.jumpsUsed || 0) + 1;
       }
@@ -1115,7 +1101,11 @@ function updateRoom(room) {
     const wasOnGround = !!p.onGround;
     const previousBottom = p.y + PLAYER_BODY_H;
     const slowFall = p.charging && !p.onGround;
-    p.vy += GRAVITY * (slowFall ? CHARGE_AIR_GRAVITY_MULT : 1);
+    const heavyLandingFallMult =
+      p.heavyLanding && !p.onGround
+        ? HEAVY_LANDING_GRAVITY_MULT + Math.max(0, (p.heavyLandingTier || 1) - 1) * HEAVY_LANDING_STACK_GRAVITY_BONUS
+        : 1;
+    p.vy += GRAVITY * (slowFall ? CHARGE_AIR_GRAVITY_MULT : 1) * heavyLandingFallMult;
     p.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, p.x + p.vx));
     p.y += p.vy;
     const bottom = p.y + PLAYER_BODY_H;
@@ -1203,6 +1193,7 @@ function updateRoom(room) {
   }
 
   room.projectiles.forEach((shot) => {
+    if ((shot.dormantUntil || 0) > now) return;
     if (shot.trapSeedSpot) {
       if ((shot.expiresAt || 0) <= now) {
         shot.dead = true;
@@ -1304,8 +1295,8 @@ function updateRoom(room) {
       if (p1.teleport) p1.teleportUsesLeft = 1 + (p1.teleportStack || 0);
       if (p0.trapSeed) p0.trapSeedUsesLeft = 2 + Math.max(0, (p0.trapSeedTier || 1) - 1);
       if (p1.trapSeed) p1.trapSeedUsesLeft = 2 + Math.max(0, (p1.trapSeedTier || 1) - 1);
-      p0.orbAmmo = ORB_AMMO_PER_ROUND;
-      p1.orbAmmo = ORB_AMMO_PER_ROUND;
+      p0.orbAmmo = playerAmmoMax(p0);
+      p1.orbAmmo = playerAmmoMax(p1);
       p0.lastShotAt = Date.now();
       p1.lastShotAt = Date.now();
     p0.x = 220;
@@ -1586,8 +1577,12 @@ io.on("connection", (socket) => {
       if (payload.action === "melee") {
         if (attackerInFire) return;
         const weaponStats = weaponStatsForId(player.weapon);
+        const cdMult = player.meleeCooldownMult != null ? player.meleeCooldownMult : 1;
+        const cooldownMs = Math.max(MIN_MELEE_COOLDOWN_MS, Math.round(weaponStats.cooldownMs * cdMult));
+        const effectiveCooldownMs =
+          weaponStats.id === "staff" ? cooldownMs + STAFF_SWING_DURATION_MS : cooldownMs;
         const now = Date.now();
-        if (weaponStats.cooldownMs > 0 && now - (player.lastMeleeAt || 0) < weaponStats.cooldownMs) return;
+        if (effectiveCooldownMs > 0 && now - (player.lastMeleeAt || 0) < effectiveCooldownMs) return;
         player.lastMeleeAt = now;
         const meleeRange = MELEE_RANGE * (player.meleeRangeScale != null ? player.meleeRangeScale : 1);
         const inRange = Math.abs(player.x - enemy.x) <= meleeRange;
@@ -1653,9 +1648,9 @@ io.on("connection", (socket) => {
         }
         const heldMs = Date.now() - player.chargeStart;
         if (heldMs >= MELEE_QUICK_TAP_MS) {
-          const orbCost = player.tripleShot ? 3 : 1;
-          const ammo = player.orbAmmo != null ? player.orbAmmo : ORB_AMMO_PER_ROUND;
-          if (!player.infiniteAmmo && ammo < orbCost) {
+          const orbCost = 1;
+          const ammo = player.orbAmmo != null ? player.orbAmmo : playerAmmoMax(player);
+          if (ammo < orbCost) {
             player.charging = false;
             return;
           }
@@ -1666,14 +1661,13 @@ io.on("connection", (socket) => {
           const centerY = 544;
           const freezeBonus = player.freezeRootBonusMs || 0;
           const instBonus = player.instantMaxCharge ? player.instantChargeBonusDmg || 0 : 0;
-          const tripleBonus = player.tripleShot ? player.tripleDamageBonus || 0 : 0;
+          const burstCount = Math.max(1, player.burstCount || 1);
           const baseDamage =
             Math.round(shot.damage * (player.damageMult || 1) * secondWindDamageMultiplier(player)) +
-            instBonus +
-            tripleBonus;
+            instBonus;
           const freezeTriangleUntil = player.freezeShot ? Date.now() + FREEZE_HIT_ROOT_MS + freezeBonus : 0;
           const freezeRootMs = player.freezeShot ? FREEZE_HIT_ROOT_MS + freezeBonus : 0;
-          const spawn = (vx, vy = 0, xOffset = 0) =>
+          const spawn = (vx, vy = 0, xOffset = 0, delayMs = 0) =>
             room.projectiles.push({
               x: player.x + 20 + xOffset,
               y: centerY - shot.h / 2,
@@ -1685,24 +1679,15 @@ io.on("connection", (socket) => {
               freezeTriangleUntil,
               freezeRootMs,
               ricochetLeft: player.ricochetOrb ? 1 + Math.max(0, (player.ricochetOrbTier || 1) - 1) : 0,
+              dormantUntil: delayMs > 0 ? Date.now() + delayMs : 0,
               targetIdx: idx === 0 ? 1 : 0,
             });
-          if (player.tripleShot) {
-            spawn(player.facing * shot.speed, 0);
-            spawn(player.facing * shot.speed * 0.92, -0.45);
-            spawn(player.facing * shot.speed * 0.92, 0.45);
-          } else {
-            spawn(player.facing * shot.speed, 0);
-          }
+          for (let i = 0; i < burstCount; i += 1) spawn(player.facing * shot.speed, 0, 0, i * 70);
           if (player.freezeShot) {
             const dir = player.facing >= 0 ? 1 : -1;
             spawn(player.facing * shot.speed, 0, -dir * FREEZE_TRAIL_ORB_OFFSET);
           }
-          if (!player.infiniteAmmo) {
-            player.orbAmmo = ammo - orbCost;
-          } else {
-            player.orbAmmo = ORB_AMMO_PER_ROUND;
-          }
+          player.orbAmmo = ammo - orbCost;
           player.lastShotAt = Date.now();
         }
         player.charging = false;
