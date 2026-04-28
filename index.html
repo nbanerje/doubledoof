@@ -12,7 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=8" />
+    <link rel="stylesheet" href="./styles.css?v=9" />
   </head>
   <body>
     <main class="app">
@@ -49,6 +49,7 @@
             </div>
           </div>
           <div class="touch-cluster touch-right">
+            <button type="button" data-touch-action="jump" class="touch-btn">Jump</button>
             <button type="button" data-touch-action="attack" class="touch-btn touch-btn--attack">Melee</button>
             <button type="button" data-touch-action="orb" class="touch-btn touch-btn--attack">Orb</button>
             <button type="button" data-touch-action="fire" class="touch-btn touch-btn--attack touch-btn--fire hidden">Fire</button>
@@ -103,6 +104,6 @@
       </aside>
     </main>
     <script src="/socket.io/socket.io.js"></script>
-    <script src="./game.js?v=18"></script>
+    <script src="./game.js?v=19"></script>
   </body>
   </html>

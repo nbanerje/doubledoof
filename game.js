@@ -1435,9 +1435,10 @@ function nextStepAfterWeapon(playerIdx) {
   return "controls_p1";
 }
 
-function selectedCharacterForRender(idx) {
+function selectedCharacterForRender(idx, p = null) {
+  if (p?.character) return p.character;
   if (mode === "online") {
-    return idx === playerIndex ? selectedOnlineLoadout.character : "knight";
+    return idx === playerIndex ? selectedOnlineLoadout.character : localState.players[idx]?.character || "knight";
   }
   return selectedLoadouts[idx]?.character || "knight";
 }
@@ -1870,13 +1871,13 @@ const touchState = {
   enabled: isTouchDevice,
   left: false,
   right: false,
-  jumpFromStick: false,
+  jump: false,
   attack: false,
   orb: false,
   fire: false,
   prevLeft: false,
   prevRight: false,
-  prevJumpFromStick: false,
+  prevJump: false,
   prevAttack: false,
   prevOrb: false,
   prevFire: false,
@@ -1913,7 +1914,7 @@ function onlineControlsFromInput() {
   return {
     left: keys.has(ok.left) || touchState.left,
     right: keys.has(ok.right) || touchState.right,
-    jump: keys.has(ok.jump) || touchState.jumpFromStick,
+    jump: keys.has(ok.jump) || touchState.jump,
   };
 }
 
@@ -2245,7 +2246,7 @@ function drawPlayer(p) {
   const baseY = p.y !== undefined && p.y !== null ? p.y : FLOOR_Y - PLAYER_BODY_H;
   const px = Math.floor(p.x);
   const py = Math.floor(baseY);
-  const characterId = selectedCharacterForRender(idx);
+  const characterId = selectedCharacterForRender(idx, p);
 
   if (characterId === "dragon" && dragonIdleBlit) {
     const runDir = dragonRunInputDirection(idx, p, v);
@@ -2665,14 +2666,14 @@ function applyTouchInput() {
   if (!touchState.enabled || remapState.active || localState.buffPickActive || !overlayEl.classList.contains("hidden")) {
     touchState.prevLeft = touchState.left;
     touchState.prevRight = touchState.right;
-    touchState.prevJumpFromStick = touchState.jumpFromStick;
+    touchState.prevJump = touchState.jump;
     touchState.prevAttack = touchState.attack;
     touchState.prevOrb = touchState.orb;
     touchState.prevFire = touchState.fire;
     return;
   }
-  const jumpNow = touchState.jumpFromStick;
-  const jumpPrev = touchState.prevJumpFromStick;
+  const jumpNow = touchState.jump;
+  const jumpPrev = touchState.prevJump;
 
   if (mode !== "online") {
     const b0 = keyBindings.p0;
@@ -2730,7 +2731,7 @@ function applyTouchInput() {
 
   touchState.prevLeft = touchState.left;
   touchState.prevRight = touchState.right;
-  touchState.prevJumpFromStick = touchState.jumpFromStick;
+  touchState.prevJump = touchState.jump;
   touchState.prevAttack = touchState.attack;
   touchState.prevOrb = touchState.orb;
   touchState.prevFire = touchState.fire;
@@ -3345,13 +3346,13 @@ function resetInputState() {
   keys.clear();
   touchState.left = false;
   touchState.right = false;
-  touchState.jumpFromStick = false;
+  touchState.jump = false;
   touchState.attack = false;
   touchState.orb = false;
   touchState.fire = false;
   touchState.prevLeft = false;
   touchState.prevRight = false;
-  touchState.prevJumpFromStick = false;
+  touchState.prevJump = false;
   touchState.prevAttack = false;
   touchState.prevOrb = false;
   touchState.prevFire = false;
@@ -5079,6 +5080,7 @@ function setupUI() {
     const applyTouchAction = (action, pressed) => {
       if (action === "left") touchState.left = pressed;
       if (action === "right") touchState.right = pressed;
+      if (action === "jump") touchState.jump = pressed;
       if (action === "attack") touchState.attack = pressed;
       if (action === "orb") touchState.orb = pressed;
       if (action === "fire") touchState.fire = pressed;
@@ -5103,13 +5105,11 @@ function setupUI() {
       const JOY_RADIUS = 52;
       const JOY_DEADZONE = 0.2;
       const JOY_MOVE_THRESHOLD = 0.32;
-      const JOY_JUMP_THRESHOLD = 0.46;
       let activeStickPointerId = null;
       const resetStick = () => {
         activeStickPointerId = null;
         touchState.left = false;
         touchState.right = false;
-        touchState.jumpFromStick = false;
         if (touchStickEl) touchStickEl.style.transform = "translate(-50%, -50%)";
       };
       const moveStick = (clientX, clientY) => {
@@ -5131,16 +5131,13 @@ function setupUI() {
         if (mag < JOY_DEADZONE) {
           touchState.left = false;
           touchState.right = false;
-          touchState.jumpFromStick = false;
           return;
         }
         // Remap after deadzone so movement comes on smoothly.
         const scaled = Math.min(1, (mag - JOY_DEADZONE) / (1 - JOY_DEADZONE));
         const sx = (nx / mag) * scaled;
-        const sy = (ny / mag) * scaled;
         touchState.left = sx < -JOY_MOVE_THRESHOLD;
         touchState.right = sx > JOY_MOVE_THRESHOLD;
-        touchState.jumpFromStick = sy < -JOY_JUMP_THRESHOLD;
       };
       touchJoystickEl.addEventListener("pointerdown", (e) => {
         e.preventDefault();
