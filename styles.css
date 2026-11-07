@@ -140,6 +140,10 @@ button:hover {
   margin-bottom: 0;
 }
 
+.keys a {
+  color: #9fd0ff;
+}
+
 .game-wrap {
   position: relative;
   display: flex;
@@ -510,13 +514,21 @@ button.char-tile:not(:disabled):hover {
 
 .char-tile-preview--character,
 .char-tile-preview--weapon {
-  width: 58px;
-  height: 42px;
+  width: 84px;
+  height: 64px;
   display: grid;
   place-items: center;
   font-family: "Press Start 2P", monospace;
   font-size: 1rem;
   color: #f7d36b;
+  overflow: hidden;
+}
+
+.char-tile-canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .char-tile-preview--character {
@@ -726,6 +738,18 @@ button.lobby-decline {
   gap: 8px;
   align-items: flex-end;
   pointer-events: auto;
+}
+
+.touch-right {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+}
+
+.touch-right .touch-btn,
+.touch-right .touch-btn--attack {
+  min-width: 0;
+  width: 100%;
 }
 
 .touch-joystick {

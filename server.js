@@ -9,6 +9,14 @@ const { Server } = require("socket.io");
 const { Pool } = require("pg");
 const { v4: uuidv4 } = require("uuid");
 const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
+const {
+  resolveConfig,
+  sanitizeSelection,
+  defaultSelection,
+  weaponStatsForAddon,
+  characterAllowed,
+  weaponAllowed,
+} = require("./addonCatalog");
 
 const app = express();
 const server = http.createServer(app);
@@ -191,10 +199,12 @@ const LEVEL_PLATFORMS = [
 ];
 
 function weaponStatsForId(id) {
+  const addonWeapon = weaponStatsForAddon(id);
+  if (addonWeapon) return addonWeapon;
   if (id === "staff") {
-    return { id: "staff", damage: STAFF_DAMAGE, knockback: STAFF_KNOCKBACK_PX, cooldownMs: STAFF_COOLDOWN_MS };
+    return { id: "staff", damage: STAFF_DAMAGE, knockback: STAFF_KNOCKBACK_PX, cooldownMs: STAFF_COOLDOWN_MS, rangeScale: 1 };
   }
-  return { id: "sword", damage: 7, knockback: MELEE_KNOCKBACK_PX, cooldownMs: SWORD_COOLDOWN_MS };
+  return { id: "sword", damage: 7, knockback: MELEE_KNOCKBACK_PX, cooldownMs: SWORD_COOLDOWN_MS, rangeScale: 1 };
 }
 
 function normalizeLevelIndex(idx) {
@@ -820,6 +830,43 @@ function attachGuestToRoom(roomId, guestUserId, guestSocketId) {
 
 app.use(cors());
 app.use(express.json());
+
+let addonSelection = defaultSelection();
+let addonUpdatedAt = null;
+
+function addonPayload() {
+  return { ...resolveConfig(addonSelection), updatedAt: addonUpdatedAt };
+}
+
+app.get("/config", (_req, res) => {
+  res.sendFile(path.join(__dirname, "config.html"));
+});
+
+app.get("/api/addon-config", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(addonPayload());
+});
+
+app.put("/api/addon-config", async (req, res) => {
+  try {
+    addonSelection = sanitizeSelection(req.body);
+    const updated = await pool.query(
+      `INSERT INTO addon_config (id, payload, updated_at)
+       VALUES ('live', $1::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+       RETURNING updated_at`,
+      [JSON.stringify(addonSelection)]
+    );
+    addonUpdatedAt = updated.rows[0].updated_at;
+    res.set("Cache-Control", "no-store");
+    res.json(addonPayload());
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("addon config save", err);
+    res.status(500).json({ error: "Could not save add-on config" });
+  }
+});
+
 app.use(express.static(path.join(__dirname)));
 
 function makeName() {
@@ -894,6 +941,26 @@ async function initDb() {
       PRIMARY KEY (user_id, friend_id)
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS addon_config (
+      id TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  const existing = await pool.query("SELECT payload, updated_at FROM addon_config WHERE id = $1", ["live"]);
+  if (!existing.rowCount) {
+    addonSelection = defaultSelection();
+    await pool.query("INSERT INTO addon_config (id, payload) VALUES ($1, $2::jsonb)", [
+      "live",
+      JSON.stringify(addonSelection),
+    ]);
+    const stamped = await pool.query("SELECT updated_at FROM addon_config WHERE id = $1", ["live"]);
+    addonUpdatedAt = stamped.rows[0].updated_at;
+  } else {
+    addonSelection = sanitizeSelection(existing.rows[0].payload);
+    addonUpdatedAt = existing.rows[0].updated_at;
+  }
 }
 
 async function authMiddleware(req, res, next) {
@@ -1564,15 +1631,11 @@ io.on("connection", (socket) => {
       const attackerInFire = playerInEnemyFire(room, idx);
 
       player.controls = payload.controls || {};
-      if (payload.weapon === "staff" || payload.weapon === "sword") {
-        player.weapon = payload.weapon;
-      }
-      if (
-        payload.character === "knight" ||
-        payload.character === "dragon" ||
-        payload.character === "funus"
-      ) {
+      if (characterAllowed(payload.character, addonSelection)) {
         player.character = payload.character;
+      }
+      if (weaponAllowed(payload.weapon, player.character || "knight", addonSelection)) {
+        player.weapon = payload.weapon;
       }
       if (payload.action === "melee") {
         if (attackerInFire) return;
@@ -1584,7 +1647,10 @@ io.on("connection", (socket) => {
         const now = Date.now();
         if (effectiveCooldownMs > 0 && now - (player.lastMeleeAt || 0) < effectiveCooldownMs) return;
         player.lastMeleeAt = now;
-        const meleeRange = MELEE_RANGE * (player.meleeRangeScale != null ? player.meleeRangeScale : 1);
+        const meleeRange =
+          MELEE_RANGE *
+          (player.meleeRangeScale != null ? player.meleeRangeScale : 1) *
+          (weaponStats.rangeScale || 1);
         const inRange = Math.abs(player.x - enemy.x) <= meleeRange;
         const facingToward = (enemy.x - player.x) * player.facing > 0;
         if (inRange && facingToward) {

@@ -1364,17 +1364,17 @@ function playerLabelForSetup(playerIdx) {
 
 function renderLoadoutSelectScreen(kind, playerIdx) {
   const isCharacter = kind === "character";
-  const options = isCharacter ? CHARACTER_OPTIONS : WEAPON_OPTIONS;
+  const loadout = activeLoadoutForPlayer(playerIdx);
+  const options = isCharacter ? currentCharacterOptions() : weaponsForCharacter(loadout.character);
   const action = isCharacter ? "select_character" : "select_weapon";
   const selectedKey = isCharacter ? "character" : "weapon";
-  const loadout = activeLoadoutForPlayer(playerIdx);
   const label = playerLabelForSetup(playerIdx);
 
   stepLabelEl.textContent = isCharacter ? "Pick character" : "Pick weapon";
   arcadeTitleEl.textContent = isCharacter ? "Pick Character" : "Pick Weapon";
   arcadeTextEl.textContent = isCharacter
-    ? `${label}: choose from 6 character slots. Knight, Dragon, and Funus are available right now.`
-    : `${label}: choose from 6 weapon slots. Sword and Staff are available right now.`;
+    ? `${label}: Knight, Dragon, and Funus are always available. Add-on fighters show up when their pack and color are enabled.`
+    : `${label}: weapons follow the fighter you picked. Core fighters use sword and staff. Add-on fighters use that pack's weapons.`;
   arcadeActionsEl.innerHTML = "";
   arcadeActionsEl.classList.add("arcade-actions--char-pick");
   arcadeCardEl?.classList.add("arcade-card--wide");
@@ -1392,17 +1392,33 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
     if (loadout[selectedKey] === opt.id) btn.classList.add("selected");
     const preview = document.createElement("span");
     preview.className = `char-tile-preview char-tile-preview--${isCharacter ? "character" : "weapon"}`;
-    preview.textContent = opt.enabled
-      ? isCharacter
-        ? opt.id === "dragon"
-          ? "D"
-          : opt.id === "funus"
-            ? "F"
-          : "K"
-        : opt.id === "staff"
-          ? "T"
-          : "S"
-      : String(i + 1);
+    if (opt.body && window.Fighters) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 72;
+      canvas.height = 84;
+      canvas.className = "char-tile-canvas";
+      Fighters.paintFighterPreview(canvas, opt.body, opt.color);
+      preview.appendChild(canvas);
+    } else if (!isCharacter && opt.id !== "sword" && opt.id !== "staff" && window.Fighters) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 96;
+      canvas.height = 48;
+      canvas.className = "char-tile-canvas";
+      Fighters.paintWeaponPreview(canvas, opt.id, opt.theme || "forest");
+      preview.appendChild(canvas);
+    } else {
+      preview.textContent = opt.enabled
+        ? isCharacter
+          ? opt.id === "dragon"
+            ? "D"
+            : opt.id === "funus"
+              ? "F"
+              : "K"
+          : opt.id === "staff"
+            ? "T"
+            : "S"
+        : String(i + 1);
+    }
     const text = document.createElement("span");
     text.className = "char-tile-label";
     text.textContent = opt.label;
@@ -1452,6 +1468,8 @@ function selectedWeaponForPlayer(idx, p = null) {
 }
 
 function weaponStatsForId(id) {
+  const addonWeapon = window.AddonCatalog && AddonCatalog.weaponStatsForAddon(id);
+  if (addonWeapon) return addonWeapon;
   if (id === "staff") {
     return {
       id: "staff",
@@ -1459,6 +1477,7 @@ function weaponStatsForId(id) {
       knockback: STAFF_KNOCKBACK_VX,
       cooldownMs: STAFF_COOLDOWN_MS,
       swingDurationMs: STAFF_SWING_DURATION_MS,
+      rangeScale: 1,
       frames: STAFF_SWING_FRAMES,
     };
   }
@@ -1468,6 +1487,7 @@ function weaponStatsForId(id) {
     knockback: MELEE_KNOCKBACK_VX,
     cooldownMs: SWORD_COOLDOWN_MS,
     swingDurationMs: SWING_DURATION_MS,
+    rangeScale: 1,
     frames: 0,
   };
 }
@@ -1715,22 +1735,48 @@ let playerIndex = 0;
 let arcadeStep = "welcome";
 let myShareName = "";
 let myLobbyUserId = "";
-const CHARACTER_OPTIONS = [
+const CORE_CHARACTER_OPTIONS = [
   { id: "knight", label: "Knight", enabled: true },
   { id: "dragon", label: "Dragon", enabled: true },
   { id: "funus", label: "Funus", enabled: true },
-  { id: "locked-3", label: "Coming soon", enabled: false },
-  { id: "locked-4", label: "Coming soon", enabled: false },
-  { id: "locked-5", label: "Coming soon", enabled: false },
 ];
-const WEAPON_OPTIONS = [
+const CORE_WEAPON_OPTIONS = [
   { id: "sword", label: "Sword", enabled: true },
   { id: "staff", label: "Staff", enabled: true },
-  { id: "locked-2", label: "Coming soon", enabled: false },
-  { id: "locked-3", label: "Coming soon", enabled: false },
-  { id: "locked-4", label: "Coming soon", enabled: false },
-  { id: "locked-5", label: "Coming soon", enabled: false },
 ];
+let addonLive = null;
+
+function currentCharacterOptions() {
+  const extra = (addonLive?.playable || []).map((entry) => ({
+    id: entry.id,
+    label: entry.label,
+    enabled: true,
+    body: entry.body,
+    color: entry.color,
+  }));
+  return [...CORE_CHARACTER_OPTIONS, ...extra];
+}
+
+function weaponsForCharacter(characterId) {
+  if (!characterId || !String(characterId).includes(":")) return CORE_WEAPON_OPTIONS;
+  const row = (addonLive?.playable || []).find((entry) => entry.id === characterId);
+  if (!row) return CORE_WEAPON_OPTIONS;
+  return row.weapons.map((weapon) => ({
+    id: weapon.id,
+    label: weapon.name,
+    enabled: true,
+    theme: row.color,
+  }));
+}
+
+function isIosBrowser() {
+  const ua = navigator.userAgent || "";
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function isStandaloneDisplay() {
+  return window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+}
 const selectedLoadouts = [
   { character: "knight", weapon: "sword" },
   { character: "knight", weapon: "sword" },
@@ -2013,20 +2059,15 @@ function setArcadeStep(step) {
   arcadeActionsEl.classList.remove("arcade-actions--char-pick");
   arcadeCardEl?.classList.remove("arcade-card--wide");
 
-  if (step === "character_p1") {
-    renderLoadoutSelectScreen("character", 0);
-    return;
-  }
-  if (step === "weapon_p1") {
-    renderLoadoutSelectScreen("weapon", 0);
-    return;
-  }
-  if (step === "character_p2") {
-    renderLoadoutSelectScreen("character", 1);
-    return;
-  }
-  if (step === "weapon_p2") {
-    renderLoadoutSelectScreen("weapon", 1);
+  if (step === "character_p1" || step === "weapon_p1" || step === "character_p2" || step === "weapon_p2") {
+    const playerIdx = step.endsWith("2") ? 1 : 0;
+    const kind = step.startsWith("weapon") ? "weapon" : "character";
+    const before = JSON.stringify(addonLive?.selection || null);
+    renderLoadoutSelectScreen(kind, playerIdx);
+    loadAddonConfig().then(() => {
+      const after = JSON.stringify(addonLive?.selection || null);
+      if (arcadeStep === step && after !== before) renderLoadoutSelectScreen(kind, playerIdx);
+    });
     return;
   }
   if (step === "controls_p1") {
@@ -2073,6 +2114,10 @@ function setArcadeStep(step) {
   arcadeTitleEl.textContent = view.title;
   arcadeTextEl.textContent = view.text;
   arcadeActionsEl.innerHTML = "";
+  if (step === "welcome" && isIosBrowser() && !isStandaloneDisplay() && arcadeExtraEl) {
+    arcadeExtraEl.innerHTML =
+      '<p class="bind-muted">On iPhone, tap Share, then Add to Home Screen. Turn the phone sideways. The joystick shows once the match starts.</p>';
+  }
   view.actions.forEach((action) => {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -2101,12 +2146,23 @@ function drawMeleeSwingIndicator(p, v, baseY) {
   const weapon = selectedWeaponForPlayer(idx, p);
   const hx = Math.floor(p.x + PLAYER_BODY_W * 0.5);
   const hy = Math.floor(baseY + 24);
-  const reach = MELEE_RANGE * (p.meleeRangeScale != null ? p.meleeRangeScale : 1) + 10;
+  const weaponStats = weaponStatsForId(weapon);
+  const reach = MELEE_RANGE * (p.meleeRangeScale != null ? p.meleeRangeScale : 1) * (weaponStats.rangeScale || 1) + 10;
   const active = swingT > 0.12 && swingT < 0.62;
   const steps = Math.ceil(reach / 3);
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  if (weapon === "staff" && staffSlap?.frames?.length >= STAFF_SWING_FRAMES) {
+  if (weapon !== "sword" && weapon !== "staff" && window.Fighters) {
+    const handX = hx + fac * 10;
+    const handY = Math.floor(baseY + 28);
+    const theme = (selectedCharacterForRender(idx, p).split(":")[1]) || "forest";
+    ctx.save();
+    ctx.translate(handX, handY);
+    ctx.scale(fac, 1);
+    ctx.rotate(-0.7 + swingT * 1.5);
+    Fighters.drawWorldWeapon(ctx, weapon, theme, swingT);
+    ctx.restore();
+  } else if (weapon === "staff" && staffSlap?.frames?.length >= STAFF_SWING_FRAMES) {
     const animT = clamp(swingT * STAFF_SWING_ANIM_SPEED, 0, 0.999);
     const frameIdx = Math.min(STAFF_SWING_FRAMES - 1, Math.floor(animT * STAFF_SWING_FRAMES));
     const bl = staffSlap.frames[frameIdx];
@@ -2247,8 +2303,21 @@ function drawPlayer(p) {
   const px = Math.floor(p.x);
   const py = Math.floor(baseY);
   const characterId = selectedCharacterForRender(idx, p);
+  const addonFighter = window.Fighters && Fighters.isAddonCharacter(characterId);
 
-  if (characterId === "dragon" && dragonIdleBlit) {
+  if (addonFighter) {
+    const movingH = dragonRunInputDirection(idx, p, v) !== 0 || Math.abs(p.vx || 0) > 0.1;
+    Fighters.drawWorldFighter(ctx, p, characterId, {
+      recoil,
+      attackPose,
+      facing: p.facing || 1,
+      freezeVibeX,
+      freezeVibeY,
+      baseY,
+      moving: movingH,
+      now,
+    });
+  } else if (characterId === "dragon" && dragonIdleBlit) {
     const runDir = dragonRunInputDirection(idx, p, v);
     const movingH = runDir !== 0;
     const dragonFacing = movingH ? runDir : p.facing || 1;
@@ -2420,9 +2489,23 @@ function drawPlayer(p) {
   }
 
   drawFighterHealthBar(p, baseY, idx);
-  drawFighterTopColorBand(p, baseY, idx);
+  if (!addonFighter) drawFighterTopColorBand(p, baseY, idx);
 
   if (attackPose) drawMeleeSwingIndicator(p, v, baseY);
+  else if (addonFighter && window.Fighters) {
+    const weaponId = selectedWeaponForPlayer(idx, p);
+    if (weaponId !== "sword" && weaponId !== "staff") {
+      const fac = p.facing || 1;
+      const theme = (characterId.split(":")[1]) || "forest";
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.translate(p.x + PLAYER_BODY_W * 0.5 + fac * 16 + freezeVibeX, baseY + 36 + freezeVibeY);
+      ctx.scale(fac, 1);
+      ctx.rotate(0.35);
+      Fighters.drawWorldWeapon(ctx, weaponId, theme, 0.2);
+      ctx.restore();
+    }
+  }
 
   const cx = p.x + PLAYER_BODY_W / 2 - recoil * 6 * (p.facing || 1);
   const feetY = baseY + PLAYER_BODY_H;
@@ -2990,9 +3073,10 @@ function getMeleeSwordBladeAabb(attacker, v, tNow) {
   const fac = attacker.facing || 1;
   const hx = Math.floor(attacker.x + PLAYER_BODY_W * 0.5);
   const idx = attacker.color === "#2f7dff" ? 0 : 1;
-  if (selectedWeaponForPlayer(idx, attacker) === "staff") {
+  const swingWeapon = selectedWeaponForPlayer(idx, attacker);
+  if (swingWeapon !== "sword") {
     const mrs = attacker.meleeRangeScale != null ? attacker.meleeRangeScale : 1;
-    const bladeL = MELEE_RANGE * mrs;
+    const bladeL = MELEE_RANGE * mrs * (weaponStatsForId(swingWeapon).rangeScale || 1);
     const y0 = baseY + 10;
     if (fac > 0) return { x: hx + 2, y: y0, w: bladeL, h: 28 };
     return { x: hx - 2 - bladeL, y: y0, w: bladeL, h: 28 };
@@ -5091,6 +5175,7 @@ function setupUI() {
       if (!action) return;
       btn.addEventListener("pointerdown", (e) => {
         e.preventDefault();
+        if (typeof btn.setPointerCapture === "function") btn.setPointerCapture(e.pointerId);
         applyTouchAction(action, true);
       });
       btn.addEventListener("pointerup", (e) => {
@@ -5098,7 +5183,6 @@ function setupUI() {
         applyTouchAction(action, false);
       });
       btn.addEventListener("pointercancel", () => applyTouchAction(action, false));
-      btn.addEventListener("pointerleave", () => applyTouchAction(action, false));
     });
 
     if (touchJoystickEl) {
@@ -5285,14 +5369,24 @@ function setupUI() {
       const optionId = t?.dataset?.optionId || "";
       const loadout = activeLoadoutForPlayer(playerIdx);
       if (action === "select_character") {
-        if (!CHARACTER_OPTIONS.some((opt) => opt.enabled && opt.id === optionId)) return;
+        if (!currentCharacterOptions().some((opt) => opt.enabled && opt.id === optionId)) return;
         loadout.character = optionId;
+        const allowedWeapons = weaponsForCharacter(optionId);
+        if (!allowedWeapons.some((opt) => opt.enabled && opt.id === loadout.weapon)) {
+          loadout.weapon = allowedWeapons.find((opt) => opt.enabled)?.id || "sword";
+        }
         setArcadeStep(nextStepAfterCharacter(playerIdx));
       } else {
-        if (!WEAPON_OPTIONS.some((opt) => opt.enabled && opt.id === optionId)) return;
+        if (!weaponsForCharacter(loadout.character).some((opt) => opt.enabled && opt.id === optionId)) return;
         loadout.weapon = optionId;
-        if (mode === "online" && touchState.enabled) setupSocket();
-        else setArcadeStep(nextStepAfterWeapon(playerIdx));
+        if (touchState.enabled) {
+          const next = nextStepAfterWeapon(playerIdx);
+          if (next === "controls_online" || mode === "online") setupSocket();
+          else if (next.startsWith("character_") || next.startsWith("weapon_")) setArcadeStep(next);
+          else launchLocalRoundFromSetup();
+        } else {
+          setArcadeStep(nextStepAfterWeapon(playerIdx));
+        }
       }
     }
     if (action === "loadout_back") {
@@ -5411,8 +5505,19 @@ function setupUI() {
   }
 }
 
+async function loadAddonConfig() {
+  try {
+    const response = await fetch("/api/addon-config", { cache: "no-store" });
+    if (!response.ok) throw new Error("addon config");
+    addonLive = await response.json();
+  } catch (err) {
+    addonLive = null;
+  }
+}
+
 async function boot() {
   loadKeyBindings();
+  await loadAddonConfig();
   if (ACCOUNT_AUTH_DISABLED) {
     profile.token = "";
     localStorage.removeItem(authTokenKey);

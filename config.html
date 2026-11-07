@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bat Duel add-ons</title>
+    <link rel="icon" href="/favicon.ico?v=2" type="image/x-icon" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#121724" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./config.css?v=1" />
+  </head>
+  <body>
+    <main class="config-app">
+      <header class="config-top">
+        <div>
+          <p class="config-kicker">Public loadout</p>
+          <h1>Add-on config</h1>
+          <p class="config-lead">
+            Turn character packs, color variants, and weapons on or off. The game only offers combinations you leave enabled.
+            No account is required.
+          </p>
+        </div>
+        <div class="config-actions">
+          <a class="config-link" href="/">Back to the game</a>
+          <button id="resetBtn" type="button">Enable all</button>
+          <button id="saveBtn" type="button">Save loadout</button>
+        </div>
+      </header>
+      <p id="statusLine" class="config-status" role="status">Loading add-ons…</p>
+      <div id="packList" class="pack-list"></div>
+    </main>
+    <script src="./addonCatalog.js?v=1"></script>
+    <script src="./fighters.js?v=1"></script>
+    <script src="./config.js?v=1"></script>
+  </body>
+</html>
