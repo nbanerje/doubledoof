@@ -6,9 +6,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Bat Duel" />
+    <meta name="apple-mobile-web-app-title" content="DoubleDoof" />
     <meta name="theme-color" content="#121724" />
-    <title>Bat Duel</title>
+    <title>DoubleDoof</title>
     <link rel="icon" href="/favicon.ico?v=2" type="image/x-icon" sizes="any" />
     <link rel="shortcut icon" href="/favicon.ico?v=2" type="image/x-icon" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -19,21 +19,22 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=10" />
+    <link rel="stylesheet" href="./styles.css?v=12" />
   </head>
   <body>
     <main class="app">
       <section class="game-wrap">
+        <div class="play-stage">
         <button id="settingsToggleBtn" class="settings-toggle" type="button" aria-label="Open settings" title="Settings">⚙</button>
         <canvas id="gameCanvas" width="1040" height="620"></canvas>
         <div id="buffPickOverlay" class="buff-pick-overlay hidden" role="dialog" aria-modal="true">
           <div class="buff-pick-shell">
             <h3 id="buffPickTitle">Pick a comeback buff</h3>
-            <p id="buffPickSub">Wait 2 seconds without clicking — then choose your buff.</p>
+            <p id="buffPickSub">Wait 8 seconds without clicking — then choose your buff.</p>
             <div class="buff-pick-stage">
               <div id="buffPickGateBlock" class="buff-pick-gate hidden" aria-live="polite">
                 <p class="buff-pick-gate-title">Stop clicking</p>
-                <p class="buff-pick-gate-sub">Buff choices unlock in 2 seconds.</p>
+                <p class="buff-pick-gate-sub">Buff choices unlock in 8 seconds.</p>
               </div>
               <div class="buff-pick-buttons" id="buffPickButtons"></div>
             </div>
@@ -43,11 +44,12 @@
         <div id="arcadeOverlay" class="arcade-overlay">
           <div id="arcadeCard" class="arcade-card">
             <p id="arcadeStepLabel" class="arcade-step">Step 1 of 4</p>
-            <h2 id="arcadeTitle">Welcome to Bat Duel</h2>
+            <h2 id="arcadeTitle">Welcome to DoubleDoof</h2>
             <p id="arcadeText">Arcade flow: pick mode, sign in if online, then start the match.</p>
             <div id="arcadeExtra" class="arcade-extra" aria-live="polite"></div>
             <div id="arcadeActions" class="arcade-actions"></div>
           </div>
+        </div>
         </div>
         <div id="touchOverlay" class="touch-overlay hidden" aria-hidden="true">
           <div class="touch-cluster touch-left">
@@ -114,6 +116,6 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="./addonCatalog.js?v=1"></script>
     <script src="./fighters.js?v=1"></script>
-    <script src="./game.js?v=21"></script>
+    <script src="./game.js?v=24"></script>
   </body>
   </html>

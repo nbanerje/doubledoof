@@ -251,6 +251,11 @@ const PLATFORM_RAISE_PX = 40;
 /** Axis-aligned body: `p.x` left, `p.y` top; feet sit on `plat.y` / `FLOOR_Y`. Matches draw anchor (feet ≈ translateY + 37). */
 const PLAYER_BODY_W = 36;
 const PLAYER_BODY_H = 48;
+/** Keeps the wider fighter graphic inside the canvas when walking to either edge. */
+const PLAYER_SCREEN_PAD = 18;
+function clampPlayerX(x) {
+  return clamp(x, PLAYER_SCREEN_PAD, VIEW_W - PLAYER_BODY_W - PLAYER_SCREEN_PAD);
+}
 const keys = new Set();
 const keyTimes = new Map();
 const authTokenKey = "bat-duel-token";
@@ -278,8 +283,10 @@ const ROUND_INTERMISSION_MS = 4000;
 const MAX_CHARGE_MS = 12000;
 /** Shorter scale = max charge reached faster */
 const CHARGE_SCALE_MS = 3200;
-/** Buff cards / keys ignore input until this many ms after the overlay opens */
-const BUFF_PICK_GATE_MS = 2000;
+/** Buff cards stay up this long before a tap or key can choose one. */
+const BUFF_PICK_GATE_MS = 8000;
+/** After the cards unlock, the computer waits this long before it picks. */
+const BUFF_BOT_THINK_MS = 8000;
 /** All buffs in the pool; each pick shows 3 different cards chosen at random. */
 const BUFF_POOL = [
   "triple",
@@ -2090,7 +2097,7 @@ function setArcadeStep(step) {
   const steps = {
     welcome: {
       index: "Step 1 of 3",
-      title: "Welcome to Bat Duel",
+      title: "Welcome to DoubleDoof",
       text: "Start a new arcade session and map your keys before the round.",
       actions: [{ id: "next", label: "Start Setup" }],
     },
@@ -2116,7 +2123,7 @@ function setArcadeStep(step) {
   arcadeActionsEl.innerHTML = "";
   if (step === "welcome" && isIosBrowser() && !isStandaloneDisplay() && arcadeExtraEl) {
     arcadeExtraEl.innerHTML =
-      '<p class="bind-muted">On iPhone, tap Share, then Add to Home Screen. Turn the phone sideways. The joystick shows once the match starts.</p>';
+      '<p class="bind-muted">On iPhone, tap Share, then Add to Home Screen. In portrait the controls sit under the fight. The joystick shows once the match starts.</p>';
   }
   view.actions.forEach((action) => {
     const btn = document.createElement("button");
@@ -3798,7 +3805,7 @@ function triggerTeleportLocal(attackerIdx) {
   if (usesLeft <= 0) return false;
   const enemy = localState.players[1 - attackerIdx];
   const dir = enemy.facing || (enemy.x >= attacker.x ? 1 : -1);
-  const targetX = clamp(enemy.x - dir * (PLAYER_BODY_W + 10), 0, VIEW_W - PLAYER_BODY_W);
+  const targetX = clampPlayerX(enemy.x - dir * (PLAYER_BODY_W + 10));
   attacker.teleportUsesLeft = usesLeft - 1;
   attacker.x = targetX;
   attacker.y = enemy.y;
@@ -4282,10 +4289,6 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
   const gate = document.getElementById("buffPickGateBlock");
   const name = loserIdx === 0 ? "Blue" : "Red";
   if (title) title.textContent = `${name} lost — choose a comeback buff`;
-  if (sub) {
-    sub.textContent =
-      "Wait 2 seconds without clicking — then pick a card or use A/← · W/↑ · D/→.";
-  }
   localState.buffPickInputUnlocked = false;
   pendingBuffReplace = null;
   if (gate) gate.classList.remove("hidden");
@@ -4294,7 +4297,16 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
     clearTimeout(buffPickGateTimer);
     buffPickGateTimer = null;
   }
-  buffPickGateTimer = setTimeout(() => {
+  const gateSub = gate?.querySelector(".buff-pick-gate-sub");
+  let gateSecondsLeft = Math.round(BUFF_PICK_GATE_MS / 1000);
+  const paintGateCountdown = () => {
+    const unit = gateSecondsLeft === 1 ? "second" : "seconds";
+    if (gateSub) gateSub.textContent = `Buff choices unlock in ${gateSecondsLeft} ${unit}.`;
+    if (sub && localState.buffPickActive && !localState.buffPickInputUnlocked) {
+      sub.textContent = `Wait ${gateSecondsLeft} ${unit} without clicking — then pick a card or use A/← · W/↑ · D/→.`;
+    }
+  };
+  const unlockBuffPick = () => {
     buffPickGateTimer = null;
     localState.buffPickInputUnlocked = true;
     if (gate) gate.classList.add("hidden");
@@ -4306,7 +4318,18 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
     if (firstCard && typeof firstCard.focus === "function") {
       requestAnimationFrame(() => firstCard.focus());
     }
-  }, BUFF_PICK_GATE_MS);
+  };
+  const tickBuffPickGate = () => {
+    if (!localState.buffPickActive) return;
+    if (gateSecondsLeft <= 0) {
+      unlockBuffPick();
+      return;
+    }
+    paintGateCountdown();
+    gateSecondsLeft -= 1;
+    buffPickGateTimer = setTimeout(tickBuffPickGate, 1000);
+  };
+  tickBuffPickGate();
   if (buffAutoPickTimer != null) {
     clearTimeout(buffAutoPickTimer);
     buffAutoPickTimer = null;
@@ -4327,7 +4350,7 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
         }
         applyBuffChoice(pick);
       }
-    }, BUFF_PICK_GATE_MS + 450);
+    }, BUFF_PICK_GATE_MS + BUFF_BOT_THINK_MS);
   }
 }
 
@@ -4437,7 +4460,7 @@ function updateLocalGame() {
         ? HEAVY_LANDING_GRAVITY_MULT + Math.max(0, (p.heavyLandingTier || 1) - 1) * HEAVY_LANDING_STACK_GRAVITY_BONUS
         : 1;
     p.vy += GRAVITY * (slowFall ? CHARGE_AIR_GRAVITY_MULT : 1) * heavyLandingFallMult;
-    p.x = clamp(p.x + p.vx, 0, VIEW_W - PLAYER_BODY_W);
+    p.x = clampPlayerX(p.x + p.vx);
     p.y += p.vy;
     const bottom = p.y + PLAYER_BODY_H;
     let landed = false;
@@ -4686,6 +4709,11 @@ async function loadProfileFromServer() {
   }
 }
 
+function gameServerOrigin() {
+  const origin = typeof window !== "undefined" ? window.BATDUEL_SERVER : "";
+  return origin ? String(origin).replace(/\/$/, "") : "";
+}
+
 function setupSocket() {
   if (socket) socket.disconnect();
   pendingInvites = [];
@@ -4694,7 +4722,8 @@ function setupSocket() {
   myLobbyUserId = "";
   arcadeStep = "online_lobby";
   renderOnlineLobby();
-  socket = io();
+  const origin = gameServerOrigin();
+  socket = origin ? io(origin) : io();
 
   socket.on("connect", () => {
     setMatchStatus("Online — pick someone to challenge or host a match.");
@@ -5507,11 +5536,13 @@ function setupUI() {
 
 async function loadAddonConfig() {
   try {
-    const response = await fetch("/api/addon-config", { cache: "no-store" });
+    const response = await fetch(`${gameServerOrigin()}/api/addon-config`, { cache: "no-store" });
     if (!response.ok) throw new Error("addon config");
     addonLive = await response.json();
   } catch (err) {
-    addonLive = null;
+    addonLive = window.AddonCatalog
+      ? window.AddonCatalog.resolveConfig(window.AddonCatalog.defaultSelection())
+      : null;
   }
 }
 

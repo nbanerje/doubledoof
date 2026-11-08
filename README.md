@@ -1,4 +1,4 @@
-# Bat Duel
+# DoubleDoof
 
 Neon-backed 2D fighting game with:
 - Single/local modes and online matchmaking.
@@ -32,7 +32,7 @@ Add-on loadout (no login): `http://localhost:3000/config`. That page turns chara
 
 ## iPhone
 
-The live site is the iPhone build. In Safari, tap Share → Add to Home Screen. The icon opens Bat Duel full screen, landscape, with a joystick plus Jump, Melee, and Orb. The same page is the Android path later. A native wrapper can point at `https://doubledoof.peoplesrobotics.com` when you want an App Store shell.
+The live site is the iPhone build. In Safari, tap Share → Add to Home Screen. The icon opens DoubleDoof full screen, landscape, with a joystick plus Jump, Melee, and Orb. The same page is the Android path later. A native wrapper can point at `https://doubledoof.peoplesrobotics.com` when you want an App Store shell.
 
 ## API + realtime architecture
 

@@ -29,7 +29,7 @@ const CHARGE_THRESHOLD_MS = 0;
 /** Quick tap under this = melee (single attack key online); longer = charge shot */
 const MELEE_QUICK_TAP_MS = 150;
 const ROUND_INTERMISSION_MS = 4000;
-const BUFF_PICK_GATE_MS = 2000;
+const BUFF_PICK_GATE_MS = 8000;
 const MAX_CHARGE_MS = 12000;
 const CHARGE_SCALE_MS = 3200;
 const MELEE_RANGE = 48;
@@ -55,6 +55,10 @@ const VIEW_W = 1040;
 const FLOOR_Y = 520;
 const PLATFORM_RAISE_PX = 40;
 const PLAYER_BODY_W = 36;
+const PLAYER_SCREEN_PAD = 18;
+function clampPlayerX(x) {
+  return Math.max(PLAYER_SCREEN_PAD, Math.min(VIEW_W - PLAYER_BODY_W - PLAYER_SCREEN_PAD, x));
+}
 const PLAYER_BODY_H = 48;
 const PLAYER_TOP_Y = FLOOR_Y - PLAYER_BODY_H;
 const GRAVITY = 0.7;
@@ -896,16 +900,16 @@ async function sendAuthCodeEmail(email, code) {
     },
     Message: {
       Subject: {
-        Data: "Your Bat Duel verification code",
+        Data: "Your DoubleDoof verification code",
         Charset: "UTF-8",
       },
       Body: {
         Text: {
-          Data: `Your Bat Duel login code is ${code}. It expires in 10 minutes.`,
+          Data: `Your DoubleDoof login code is ${code}. It expires in 10 minutes.`,
           Charset: "UTF-8",
         },
         Html: {
-          Data: `<p>Your Bat Duel login code is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`,
+          Data: `<p>Your DoubleDoof login code is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`,
           Charset: "UTF-8",
         },
       },
@@ -1173,7 +1177,7 @@ function updateRoom(room) {
         ? HEAVY_LANDING_GRAVITY_MULT + Math.max(0, (p.heavyLandingTier || 1) - 1) * HEAVY_LANDING_STACK_GRAVITY_BONUS
         : 1;
     p.vy += GRAVITY * (slowFall ? CHARGE_AIR_GRAVITY_MULT : 1) * heavyLandingFallMult;
-    p.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, p.x + p.vx));
+    p.x = clampPlayerX(p.x + p.vx);
     p.y += p.vy;
     const bottom = p.y + PLAYER_BODY_H;
     let landed = false;
@@ -1698,7 +1702,7 @@ io.on("connection", (socket) => {
             });
           }
           const dir = enemy.x >= player.x ? 1 : -1;
-          enemy.x = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, enemy.x + dir * weaponStats.knockback));
+          enemy.x = clampPlayerX(enemy.x + dir * weaponStats.knockback);
         }
       }
       if (payload.action === "chargeStart") {
@@ -1795,7 +1799,7 @@ io.on("connection", (socket) => {
         const usesLeft = Number.isFinite(player.teleportUsesLeft) ? player.teleportUsesLeft : 0;
         if (usesLeft <= 0) return;
         const dir = enemy.facing || (enemy.x >= player.x ? 1 : -1);
-        const targetX = Math.max(0, Math.min(VIEW_W - PLAYER_BODY_W, enemy.x - dir * (PLAYER_BODY_W + 10)));
+        const targetX = clampPlayerX(enemy.x - dir * (PLAYER_BODY_W + 10));
         player.teleportUsesLeft = usesLeft - 1;
         player.x = targetX;
         player.y = enemy.y;
