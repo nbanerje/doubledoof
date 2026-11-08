@@ -1434,8 +1434,8 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
   stepLabelEl.textContent = isCharacter ? "Pick character" : "Pick weapon";
   arcadeTitleEl.textContent = isCharacter ? "Pick Character" : "Pick Weapon";
   arcadeTextEl.textContent = isCharacter
-    ? `${label}: swipe left or right. Each fighter lists its powers. Tap one to choose it.`
-    : `${label}: weapons follow the fighter you picked. Core fighters use sword and staff. Add-on fighters use that pack's weapons.`;
+    ? `${label}: swipe sideways and tap a fighter. Its powers are written on the card.`
+    : `${label}: weapons are listed from the top. Core fighters use sword and staff.`;
   arcadeActionsEl.innerHTML = "";
   arcadeActionsEl.classList.add("arcade-actions--char-pick");
   arcadeCardEl?.classList.toggle("arcade-card--carousel", isCharacter);
@@ -1499,7 +1499,7 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
     nav.append(prev, count, next);
     arcadeActionsEl.append(scroller, nav);
     requestAnimationFrame(() => {
-      if (selectedSlide) selectedSlide.scrollIntoView({ inline: "start", block: "nearest" });
+      if (selectedSlide) scroller.scrollLeft = selectedSlide.offsetLeft;
       paintCount();
     });
   } else {
@@ -2014,6 +2014,82 @@ const touchStickEl = document.getElementById("touchStick");
 const isTouchDevice =
   window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window || navigator.maxTouchPoints > 0;
 
+const SAFARI_NUDGE_MIN_PX = 72;
+
+function isBundledApp() {
+  return typeof window.BATDUEL_SERVER === "string" && window.BATDUEL_SERVER.length > 0;
+}
+
+function safariLandscapeNudgeNeeded() {
+  if (isBundledApp() || isStandaloneDisplay()) return false;
+  if (document.fullscreenElement || document.webkitFullscreenElement) return false;
+  const coarse = window.matchMedia("(pointer: coarse)").matches || isTouchDevice;
+  const landscape = window.matchMedia("(orientation: landscape)").matches;
+  return coarse && landscape;
+}
+
+function pinAppToVisibleScreen() {
+  const app = document.querySelector(".app");
+  if (!app) return;
+  const hack = document.documentElement.classList.contains("safari-scroll-hack");
+  if (!hack) {
+    app.style.top = "";
+    app.style.left = "";
+    app.style.right = "";
+    app.style.bottom = "";
+    app.style.width = "";
+    app.style.height = "";
+    return;
+  }
+  const vv = window.visualViewport;
+  const top = vv ? vv.offsetTop : 0;
+  const left = vv ? vv.offsetLeft : 0;
+  const width = vv ? vv.width : window.innerWidth;
+  const height = vv ? vv.height : window.innerHeight;
+  app.style.top = `${top}px`;
+  app.style.left = `${left}px`;
+  app.style.right = "auto";
+  app.style.bottom = "auto";
+  app.style.width = `${width}px`;
+  app.style.height = `${height}px`;
+}
+
+function scrollSafariChromeAway() {
+  const nudge = document.getElementById("safariNudge");
+  const root = document.documentElement;
+  if (!safariLandscapeNudgeNeeded()) {
+    root.classList.remove("safari-scroll-hack");
+    document.body.style.minHeight = "";
+    if (nudge) nudge.style.height = "";
+    pinAppToVisibleScreen();
+    return;
+  }
+  const chromeGap = Math.max(0, (window.outerHeight || 0) - window.innerHeight);
+  const distance = Math.max(SAFARI_NUDGE_MIN_PX, Math.min(chromeGap || SAFARI_NUDGE_MIN_PX, 160));
+  root.classList.add("safari-scroll-hack");
+  document.body.style.minHeight = `${window.innerHeight + distance}px`;
+  if (nudge) nudge.style.height = `${distance}px`;
+  window.scrollTo(0, distance);
+  pinAppToVisibleScreen();
+}
+
+let safariNudgeTimer = 0;
+function scheduleSafariLandscapeNudge() {
+  scrollSafariChromeAway();
+  window.clearTimeout(safariNudgeTimer);
+  safariNudgeTimer = window.setTimeout(scrollSafariChromeAway, 280);
+}
+
+window.addEventListener("resize", scheduleSafariLandscapeNudge);
+window.addEventListener("orientationchange", scheduleSafariLandscapeNudge);
+window.addEventListener("pageshow", scheduleSafariLandscapeNudge);
+document.addEventListener("fullscreenchange", scheduleSafariLandscapeNudge);
+document.addEventListener("webkitfullscreenchange", scheduleSafariLandscapeNudge);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", pinAppToVisibleScreen);
+  window.visualViewport.addEventListener("scroll", pinAppToVisibleScreen);
+}
+
 function enterImmersivePlay() {
   if (!isTouchDevice || isStandaloneDisplay()) return;
   const el = document.documentElement;
@@ -2035,7 +2111,11 @@ function enterImmersivePlay() {
     }
   }
 }
-document.addEventListener("pointerdown", enterImmersivePlay);
+document.addEventListener("pointerdown", () => {
+  enterImmersivePlay();
+  scheduleSafariLandscapeNudge();
+});
+scheduleSafariLandscapeNudge();
 const touchState = {
   enabled: isTouchDevice,
   left: false,
@@ -2239,7 +2319,7 @@ function setArcadeStep(step) {
   arcadeActionsEl.innerHTML = "";
   if (step === "welcome" && isIosBrowser() && !isStandaloneDisplay() && arcadeExtraEl) {
     arcadeExtraEl.innerHTML =
-      '<p class="bind-muted">The game stays landscape, even if the phone is upright. Tap once to hide Safari’s tabs. Add to Home Screen for a full-screen icon. The joystick and buttons sit beside the fight once the match starts.</p>';
+      '<p class="bind-muted">The game stays landscape, even if the phone is upright. The page scrolls down a little so Safari’s bars tuck away. Add to Home Screen for a full-screen icon. The joystick and buttons sit beside the fight once the match starts.</p>';
   }
   view.actions.forEach((action) => {
     const btn = document.createElement("button");
