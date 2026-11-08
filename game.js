@@ -2014,18 +2014,25 @@ const touchStickEl = document.getElementById("touchStick");
 const isTouchDevice =
   window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window || navigator.maxTouchPoints > 0;
 
-const SAFARI_NUDGE_MIN_PX = 72;
+const SAFARI_NUDGE_MIN_PX = 100;
 
 function isBundledApp() {
   return typeof window.BATDUEL_SERVER === "string" && window.BATDUEL_SERVER.length > 0;
+}
+
+function isLandscapeViewport() {
+  if (window.matchMedia("(orientation: landscape)").matches) return true;
+  if (typeof window.orientation === "number" && (Math.abs(window.orientation) === 90)) return true;
+  const screenOrientation = window.screen?.orientation?.type || "";
+  if (String(screenOrientation).startsWith("landscape")) return true;
+  return window.innerWidth > window.innerHeight;
 }
 
 function safariLandscapeNudgeNeeded() {
   if (isBundledApp() || isStandaloneDisplay()) return false;
   if (document.fullscreenElement || document.webkitFullscreenElement) return false;
   const coarse = window.matchMedia("(pointer: coarse)").matches || isTouchDevice;
-  const landscape = window.matchMedia("(orientation: landscape)").matches;
-  return coarse && landscape;
+  return coarse && isLandscapeViewport();
 }
 
 function pinAppToVisibleScreen() {
@@ -2054,30 +2061,43 @@ function pinAppToVisibleScreen() {
   app.style.height = `${height}px`;
 }
 
+function safariNudgeDistance() {
+  const chromeGap = Math.max(0, (window.outerHeight || 0) - window.innerHeight);
+  const screenGap = Math.max(0, (window.screen?.height || 0) - window.innerHeight);
+  return Math.max(SAFARI_NUDGE_MIN_PX, Math.min(Math.max(chromeGap, screenGap, SAFARI_NUDGE_MIN_PX), 180));
+}
+
 function scrollSafariChromeAway() {
   const nudge = document.getElementById("safariNudge");
   const root = document.documentElement;
   if (!safariLandscapeNudgeNeeded()) {
     root.classList.remove("safari-scroll-hack");
+    document.body.style.height = "";
     document.body.style.minHeight = "";
     if (nudge) nudge.style.height = "";
+    if (window.scrollY) window.scrollTo(0, 0);
     pinAppToVisibleScreen();
     return;
   }
-  const chromeGap = Math.max(0, (window.outerHeight || 0) - window.innerHeight);
-  const distance = Math.max(SAFARI_NUDGE_MIN_PX, Math.min(chromeGap || SAFARI_NUDGE_MIN_PX, 160));
+  const distance = safariNudgeDistance();
   root.classList.add("safari-scroll-hack");
+  document.body.style.height = `${window.innerHeight + distance}px`;
   document.body.style.minHeight = `${window.innerHeight + distance}px`;
   if (nudge) nudge.style.height = `${distance}px`;
+  // Classic mobile Safari chrome collapse: create overflow, then scroll it away.
+  window.scrollTo(0, 1);
   window.scrollTo(0, distance);
   pinAppToVisibleScreen();
 }
 
-let safariNudgeTimer = 0;
+const safariNudgeTimers = [];
 function scheduleSafariLandscapeNudge() {
   scrollSafariChromeAway();
-  window.clearTimeout(safariNudgeTimer);
-  safariNudgeTimer = window.setTimeout(scrollSafariChromeAway, 280);
+  while (safariNudgeTimers.length) window.clearTimeout(safariNudgeTimers.pop());
+  // iOS updates layout after orientationchange; keep pushing chrome away.
+  for (const ms of [50, 150, 300, 600, 1000, 1600]) {
+    safariNudgeTimers.push(window.setTimeout(scrollSafariChromeAway, ms));
+  }
 }
 
 window.addEventListener("resize", scheduleSafariLandscapeNudge);
@@ -2085,9 +2105,18 @@ window.addEventListener("orientationchange", scheduleSafariLandscapeNudge);
 window.addEventListener("pageshow", scheduleSafariLandscapeNudge);
 document.addEventListener("fullscreenchange", scheduleSafariLandscapeNudge);
 document.addEventListener("webkitfullscreenchange", scheduleSafariLandscapeNudge);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) scheduleSafariLandscapeNudge();
+});
 if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", pinAppToVisibleScreen);
+  window.visualViewport.addEventListener("resize", () => {
+    pinAppToVisibleScreen();
+    scheduleSafariLandscapeNudge();
+  });
   window.visualViewport.addEventListener("scroll", pinAppToVisibleScreen);
+}
+if (window.screen?.orientation?.addEventListener) {
+  window.screen.orientation.addEventListener("change", scheduleSafariLandscapeNudge);
 }
 
 function enterImmersivePlay() {
@@ -2107,14 +2136,25 @@ function enterImmersivePlay() {
     try {
       el.webkitRequestFullscreen();
     } catch {
-      /* Fullscreen is optional; the landscape layout still fills the page. */
+      /* Fullscreen is optional; the landscape scroll nudge still hides browser chrome. */
     }
   }
 }
-document.addEventListener("pointerdown", () => {
-  enterImmersivePlay();
-  scheduleSafariLandscapeNudge();
-});
+document.addEventListener(
+  "pointerdown",
+  () => {
+    enterImmersivePlay();
+    scheduleSafariLandscapeNudge();
+  },
+  { passive: true }
+);
+document.addEventListener(
+  "touchstart",
+  () => {
+    scheduleSafariLandscapeNudge();
+  },
+  { passive: true }
+);
 scheduleSafariLandscapeNudge();
 const touchState = {
   enabled: isTouchDevice,
