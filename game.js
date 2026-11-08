@@ -2081,13 +2081,21 @@ function scrollSafariChromeAway() {
   }
   const distance = safariNudgeDistance();
   root.classList.add("safari-scroll-hack");
-  document.body.style.height = `${window.innerHeight + distance}px`;
-  document.body.style.minHeight = `${window.innerHeight + distance}px`;
+  // Make the document taller than the visible viewport so Safari can scroll chrome away.
+  const tall = Math.max(window.innerHeight, window.visualViewport?.height || 0) + distance + 24;
+  document.body.style.height = `${tall}px`;
+  document.body.style.minHeight = `${tall}px`;
   if (nudge) nudge.style.height = `${distance}px`;
   // Classic mobile Safari chrome collapse: create overflow, then scroll it away.
-  window.scrollTo(0, 1);
-  window.scrollTo(0, distance);
-  pinAppToVisibleScreen();
+  const applyScroll = () => {
+    window.scrollTo(0, 1);
+    window.scrollTo(0, distance);
+    document.documentElement.scrollTop = distance;
+    document.body.scrollTop = distance;
+    pinAppToVisibleScreen();
+  };
+  applyScroll();
+  requestAnimationFrame(applyScroll);
 }
 
 const safariNudgeTimers = [];

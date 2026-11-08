@@ -1342,15 +1342,25 @@ button.lobby-decline {
   pointer-events: none;
 }
 
-html.safari-scroll-hack,
+html.safari-scroll-hack {
+  position: static !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: scroll !important;
+  touch-action: pan-y;
+  overscroll-behavior-y: none;
+}
+
 html.safari-scroll-hack body {
   position: static !important;
   inset: auto !important;
   width: 100% !important;
-  height: auto !important;
-  min-height: 0 !important;
-  overflow: auto !important;
-  overflow-x: hidden !important;
+  /* JS sets an explicit taller height so window.scrollTo can move the page. */
+  min-height: 100% !important;
+  overflow: visible !important;
   touch-action: pan-y;
   overscroll-behavior-y: none;
 }
