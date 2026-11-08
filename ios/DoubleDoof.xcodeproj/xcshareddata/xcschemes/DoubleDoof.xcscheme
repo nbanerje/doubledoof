@@ -16,8 +16,8 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A10000000000000000000002"
                BuildableName = "DoubleDoof.app"
-               BlueprintName = "BatDuel"
-               ReferencedContainer = "container:BatDuel.xcodeproj">
+               BlueprintName = "DoubleDoof"
+               ReferencedContainer = "container:DoubleDoof.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -46,8 +46,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000002"
             BuildableName = "DoubleDoof.app"
-            BlueprintName = "BatDuel"
-            ReferencedContainer = "container:BatDuel.xcodeproj">
+            BlueprintName = "DoubleDoof"
+            ReferencedContainer = "container:DoubleDoof.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -63,8 +63,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000002"
             BuildableName = "DoubleDoof.app"
-            BlueprintName = "BatDuel"
-            ReferencedContainer = "container:BatDuel.xcodeproj">
+            BlueprintName = "DoubleDoof"
+            ReferencedContainer = "container:DoubleDoof.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

@@ -7,18 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10000000000000000000020 /* BatDuelApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* BatDuelApp.swift */; };
+		A10000000000000000000020 /* DoubleDoofApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* DoubleDoofApp.swift */; };
 		A10000000000000000000021 /* GameWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* GameWebView.swift */; };
 		A10000000000000000000022 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A10000000000000000000010 /* BatDuelApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatDuelApp.swift; sourceTree = "<group>"; };
+		A10000000000000000000010 /* DoubleDoofApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoofApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000011 /* GameWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameWebView.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000000000000000000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000014 /* copy-web.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "copy-web.sh"; sourceTree = "<group>"; };
-		A10000000000000000000015 /* BatDuel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DoubleDoof.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000015 /* DoubleDoof.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DoubleDoof.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -35,27 +35,27 @@
 		A10000000000000000000030 = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000031 /* BatDuel */,
+				A10000000000000000000031 /* DoubleDoof */,
 				A10000000000000000000014 /* copy-web.sh */,
 				A10000000000000000000032 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		A10000000000000000000031 /* BatDuel */ = {
+		A10000000000000000000031 /* DoubleDoof */ = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000010 /* BatDuelApp.swift */,
+				A10000000000000000000010 /* DoubleDoofApp.swift */,
 				A10000000000000000000011 /* GameWebView.swift */,
 				A10000000000000000000012 /* Assets.xcassets */,
 				A10000000000000000000013 /* Info.plist */,
 			);
-			path = BatDuel;
+			path = DoubleDoof;
 			sourceTree = "<group>";
 		};
 		A10000000000000000000032 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000015 /* BatDuel.app */,
+				A10000000000000000000015 /* DoubleDoof.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -63,9 +63,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A10000000000000000000002 /* BatDuel */ = {
+		A10000000000000000000002 /* DoubleDoof */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A10000000000000000000051 /* Build configuration list for PBXNativeTarget "BatDuel" */;
+			buildConfigurationList = A10000000000000000000051 /* Build configuration list for PBXNativeTarget "DoubleDoof" */;
 			buildPhases = (
 				A10000000000000000000003 /* Sources */,
 				A10000000000000000000006 /* Frameworks */,
@@ -76,9 +76,9 @@
 			);
 			dependencies = (
 			);
-			name = BatDuel;
-			productName = BatDuel;
-			productReference = A10000000000000000000015 /* BatDuel.app */;
+			name = DoubleDoof;
+			productName = DoubleDoof;
+			productReference = A10000000000000000000015 /* DoubleDoof.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -95,7 +95,7 @@
 					};
 				};
 			};
-			buildConfigurationList = A10000000000000000000050 /* Build configuration list for PBXProject "BatDuel" */;
+			buildConfigurationList = A10000000000000000000050 /* Build configuration list for PBXProject "DoubleDoof" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -108,7 +108,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A10000000000000000000002 /* BatDuel */,
+				A10000000000000000000002 /* DoubleDoof */,
 			);
 		};
 /* End PBXProject section */
@@ -151,7 +151,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000000000000000000020 /* BatDuelApp.swift in Sources */,
+				A10000000000000000000020 /* DoubleDoofApp.swift in Sources */,
 				A10000000000000000000021 /* GameWebView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -198,7 +198,7 @@
 				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = DC3W3P2K55;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = BatDuel/Info.plist;
+				INFOPLIST_FILE = DoubleDoof/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = DoubleDoof;
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
@@ -226,7 +226,7 @@
 				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = DC3W3P2K55;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = BatDuel/Info.plist;
+				INFOPLIST_FILE = DoubleDoof/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = DoubleDoof;
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
@@ -249,7 +249,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A10000000000000000000050 /* Build configuration list for PBXProject "BatDuel" */ = {
+		A10000000000000000000050 /* Build configuration list for PBXProject "DoubleDoof" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A10000000000000000000040 /* Debug */,
@@ -258,7 +258,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A10000000000000000000051 /* Build configuration list for PBXNativeTarget "BatDuel" */ = {
+		A10000000000000000000051 /* Build configuration list for PBXNativeTarget "DoubleDoof" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A10000000000000000000042 /* Debug */,

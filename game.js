@@ -2133,7 +2133,11 @@ const isTouchDevice =
 const SAFARI_NUDGE_MIN_PX = 100;
 
 function isBundledApp() {
-  return typeof window.BATDUEL_SERVER === "string" && window.BATDUEL_SERVER.length > 0;
+  const origin =
+    (typeof window.DOUBLEDOOF_SERVER === "string" && window.DOUBLEDOOF_SERVER) ||
+    (typeof window.BATDUEL_SERVER === "string" && window.BATDUEL_SERVER) ||
+    "";
+  return origin.length > 0;
 }
 
 function isLandscapeViewport() {
@@ -5148,7 +5152,8 @@ async function loadProfileFromServer() {
 }
 
 function gameServerOrigin() {
-  const origin = typeof window !== "undefined" ? window.BATDUEL_SERVER : "";
+  if (typeof window === "undefined") return "";
+  const origin = window.DOUBLEDOOF_SERVER || window.BATDUEL_SERVER || "";
   return origin ? String(origin).replace(/\/$/, "") : "";
 }
 

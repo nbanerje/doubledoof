@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct BatDuelApp: App {
+struct DoubleDoofApp: App {
     var body: some Scene {
         WindowGroup {
             GameWebView()

@@ -13,8 +13,8 @@ path = pathlib.Path(sys.argv[1])
 text = path.read_text()
 text = text.replace('src="/socket.io/socket.io.js"', 'src="./socket.io.min.js"')
 needle = '<script src="./addonCatalog.js?v=1"></script>'
-insert = '<script>window.BATDUEL_SERVER="https://doubledoof.onrender.com";</script>\n    ' + needle
-if "BATDUEL_SERVER" not in text and needle in text:
+insert = '<script>window.DOUBLEDOOF_SERVER="https://doubledoof.onrender.com";window.BATDUEL_SERVER=window.DOUBLEDOOF_SERVER;</script>\n    ' + needle
+if "DOUBLEDOOF_SERVER" not in text and "BATDUEL_SERVER" not in text and needle in text:
     text = text.replace(needle, insert, 1)
 path.write_text(text)
 PY
