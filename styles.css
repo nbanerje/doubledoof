@@ -210,6 +210,15 @@ button:hover {
   line-height: 1.5;
 }
 
+.buff-pick-timer {
+  margin: 0 0 8px;
+  font-family: "Press Start 2P", monospace;
+  font-size: 1.35rem;
+  line-height: 1.4;
+  text-align: center;
+  color: #f6c95a;
+}
+
 .buff-pick-stage {
   position: relative;
   min-height: 188px;
@@ -473,6 +482,91 @@ button:hover {
   overflow-y: auto;
 }
 
+.arcade-card--carousel {
+  width: min(96%, 640px);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.char-carousel {
+  display: flex;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  scrollbar-width: none;
+}
+
+.char-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+button.char-slide {
+  flex: 0 0 100%;
+  min-width: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  min-height: 0;
+  padding: 12px;
+  text-align: left;
+  border-radius: 10px;
+  border: 2px solid #4a5f94;
+  background: linear-gradient(180deg, #1a2540, #141c32);
+}
+
+button.char-slide.selected {
+  border-color: #f6c95a;
+  background: linear-gradient(180deg, #33415f, #1f2c4a);
+}
+
+button.char-slide:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.char-slide-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.char-slide-desc {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: #c5d4f5;
+  line-height: 1.35;
+}
+
+.char-carousel-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.char-carousel-count {
+  margin: 0;
+  color: #9eb5ed;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.char-carousel-nav button {
+  min-width: 96px;
+}
+
 .char-pick-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
@@ -626,6 +720,12 @@ button.char-tile:not(:disabled):hover {
   touch-action: manipulation;
 }
 
+.arcade-actions button.char-slide {
+  min-width: 100%;
+  flex: 0 0 100%;
+  touch-action: pan-x;
+}
+
 .hidden {
   opacity: 0;
   pointer-events: none;
@@ -723,10 +823,6 @@ button.lobby-accept {
 
 button.lobby-decline {
   border-color: #6a4a4a;
-}
-
-.rotate-gate {
-  display: none;
 }
 
 .touch-overlay {
@@ -906,38 +1002,99 @@ button.lobby-decline {
   }
 }
 
-@media (pointer: coarse) and (orientation: portrait) {
-  .rotate-gate {
-    display: flex;
-    position: fixed;
-    inset: 0;
-    z-index: 40;
-    flex-direction: column;
+@media (pointer: coarse) {
+  .arcade-overlay,
+  .buff-pick-overlay {
+    align-items: flex-start;
+    justify-content: flex-start;
+    overflow: auto;
+    padding: 8px;
+  }
+
+  .arcade-card,
+  .arcade-card--wide,
+  .arcade-card--carousel {
+    width: 100%;
+    max-height: none;
+    padding: 10px;
+  }
+
+  .arcade-card h2 {
+    font-size: 1.05rem;
+  }
+
+  .arcade-card p,
+  .char-slide-desc {
+    font-size: 0.75rem;
+  }
+
+  button.char-slide {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .char-tile-preview--character,
+  .char-tile-preview--weapon {
+    width: 56px;
+    height: 44px;
+    flex: 0 0 auto;
+  }
+
+  .char-pick-grid {
+    grid-template-columns: 1fr;
+    align-content: start;
+    justify-items: stretch;
+  }
+
+  button.char-tile {
+    flex-direction: row;
+    justify-content: flex-start;
     align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 28px;
-    text-align: center;
-    background: #121724;
-    color: #eaf0ff;
+    gap: 8px;
+    padding: 6px 8px;
   }
 
-  .rotate-gate-title {
-    margin: 0;
-    font-family: "Press Start 2P", monospace;
+  .buff-pick-shell {
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    padding: 10px;
+  }
+
+  .buff-pick-shell h3 {
+    font-size: 1rem;
+  }
+
+  .buff-pick-timer {
     font-size: 0.95rem;
-    line-height: 1.6;
+    margin-bottom: 4px;
   }
 
-  .rotate-gate p {
-    margin: 0;
-    max-width: 280px;
-    color: #b7c6ee;
-    line-height: 1.45;
+  .buff-pick-shell > p {
+    margin-bottom: 8px;
+    font-size: 0.78rem;
+  }
+
+  .buff-pick-buttons {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .buff-card.buff-btn,
+  .buff-card.buff-btn:nth-child(1),
+  .buff-card.buff-btn:nth-child(2),
+  .buff-card.buff-btn:nth-child(3) {
+    min-height: 0;
+    transform: none;
+  }
+
+  .buff-card-face {
+    min-height: 0;
+    padding: 8px 10px;
   }
 }
 
-@media (pointer: coarse) and (orientation: landscape) {
+@media (pointer: coarse) {
   .app {
     width: 100dvw;
     height: 100dvh;
@@ -1018,5 +1175,33 @@ button.lobby-decline {
     width: min(124px, 32dvh);
     min-width: 108px;
     min-height: 72px;
+  }
+}
+
+@media (pointer: coarse) and (orientation: portrait) {
+  html,
+  body {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .app {
+    position: fixed;
+    top: 0;
+    left: 100dvw;
+    width: 100dvh;
+    height: 100dvw;
+    min-height: 0;
+    padding: 0;
+    transform: rotate(90deg);
+    transform-origin: top left;
+  }
+
+  .game-wrap {
+    width: 100%;
+    height: 100%;
   }
 }

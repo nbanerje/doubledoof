@@ -4,7 +4,7 @@
   "description": "Fighting game with add-on fighters, colors, and weapons.",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "fullscreen",
   "orientation": "landscape",
   "background_color": "#121724",
   "theme_color": "#121724",

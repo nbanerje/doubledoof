@@ -19,13 +19,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=13" />
+    <link rel="stylesheet" href="./styles.css?v=15" />
   </head>
   <body>
-    <div id="rotateGate" class="rotate-gate" role="dialog" aria-label="Rotate to landscape">
-      <p class="rotate-gate-title">Turn sideways</p>
-      <p>DoubleDoof plays in landscape. Rotate your phone to keep the controls off the fight.</p>
-    </div>
     <main class="app">
       <section class="game-wrap">
         <div class="play-stage">
@@ -34,12 +30,9 @@
         <div id="buffPickOverlay" class="buff-pick-overlay hidden" role="dialog" aria-modal="true">
           <div class="buff-pick-shell">
             <h3 id="buffPickTitle">Pick a comeback buff</h3>
-            <p id="buffPickSub">Wait 8 seconds without clicking — then choose your buff.</p>
+            <p id="buffPickTimer" class="buff-pick-timer" aria-live="polite">8</p>
+            <p id="buffPickSub">Choose a power. The cards stay up until you pick or the timer ends.</p>
             <div class="buff-pick-stage">
-              <div id="buffPickGateBlock" class="buff-pick-gate hidden" aria-live="polite">
-                <p class="buff-pick-gate-title">Stop clicking</p>
-                <p class="buff-pick-gate-sub">Buff choices unlock in 8 seconds.</p>
-              </div>
               <div class="buff-pick-buttons" id="buffPickButtons"></div>
             </div>
           </div>
@@ -113,13 +106,13 @@
         <p class="keys">
           <a href="/config">Add-on config</a> chooses which character colors and weapons are in the game. No login.<br />
           After choosing a mode, each player can remap move, jump, melee, and charge (shoot) keys. Bindings save in this browser.<br />
-          Local: P2 defaults to Comma (melee) and Down (charge). After a round, wait 2s then the loser picks a buff. Charge orb has no hold delay, builds faster, and slows your fall while airborne. Online: quick tap still melees; hold charges faster.
+          Local: P2 defaults to Comma (melee) and Down (charge). After a round, the loser has 8 seconds on a countdown to pick a buff. Charge orb has no hold delay, builds faster, and slows your fall while airborne. Online: quick tap still melees; hold charges faster.
         </p>
       </aside>
     </main>
     <script src="/socket.io/socket.io.js"></script>
     <script src="./addonCatalog.js?v=1"></script>
-    <script src="./fighters.js?v=1"></script>
-    <script src="./game.js?v=25"></script>
+    <script src="./fighters.js?v=2"></script>
+    <script src="./game.js?v=28"></script>
   </body>
   </html>

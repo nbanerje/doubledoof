@@ -272,10 +272,12 @@
     const fac = pose.facing || p.facing || 1;
     const bob = pose.moving ? Math.round(Math.sin((pose.now || 0) * 0.014) * 2) : 0;
     const lean = pose.attackPose ? 4 : 0;
-    const dw = 58;
-    const dh = 92;
-    const footX = p.x + 18 + pose.freezeVibeX - (pose.recoil ? 4 * fac : 0) + fac * lean;
-    const footY = pose.baseY + 48 + pose.freezeVibeY + bob;
+    const bodyW = 26;
+    const bodyH = 34;
+    const dw = 38;
+    const dh = 44;
+    const footX = p.x + bodyW / 2 + pose.freezeVibeX - (pose.recoil ? 4 * fac : 0) + fac * lean;
+    const footY = pose.baseY + bodyH + pose.freezeVibeY + bob;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.translate(footX, footY);

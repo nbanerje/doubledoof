@@ -54,12 +54,12 @@ const CHEAT_BLUE_MELEE_BURST_HITS = 5;
 const VIEW_W = 1040;
 const FLOOR_Y = 520;
 const PLATFORM_RAISE_PX = 40;
-const PLAYER_BODY_W = 36;
+const PLAYER_BODY_W = 26;
 const PLAYER_SCREEN_PAD = 18;
 function clampPlayerX(x) {
   return Math.max(PLAYER_SCREEN_PAD, Math.min(VIEW_W - PLAYER_BODY_W - PLAYER_SCREEN_PAD, x));
 }
-const PLAYER_BODY_H = 48;
+const PLAYER_BODY_H = 34;
 const PLAYER_TOP_Y = FLOOR_Y - PLAYER_BODY_H;
 const GRAVITY = 0.7;
 const CHARGE_AIR_GRAVITY_MULT = 0.26;
@@ -798,6 +798,7 @@ function createHostRoom(hostUserId, hostSocketId) {
     buffPickOptions: null,
     buffPickInputUnlocked: false,
     buffUnlockAt: 0,
+    buffPickDeadline: 0,
     buffLastOfferedKey: null,
     blueMeleeBurstHits: 0,
     roundResult: null,
@@ -1103,12 +1104,52 @@ app.get("/api/health", (_, res) => {
   res.json({ ok: true });
 });
 
+function settleOnlineBuffPick(room, buffId, replaceBuffId) {
+  const loser = room.buffPickLoser;
+  const pl = room.players[loser];
+  if (!pl) return false;
+  const needKeyBindPause =
+    (buffId === "fireBreath" && !pl.fireBreath) ||
+    (buffId === "groundPound" && !pl.groundPound) ||
+    (buffId === "teleport" && !pl.teleport);
+  const applied = applyBuffToPlayerOnline(pl, buffId, replaceBuffId || null);
+  if (!applied.ok) return false;
+  room.buffPickActive = false;
+  room.buffPickInputUnlocked = false;
+  room.buffUnlockAt = 0;
+  room.buffPickDeadline = 0;
+  if (needKeyBindPause && (buffId === "fireBreath" || buffId === "groundPound" || buffId === "teleport")) {
+    room.intermissionStartedAt = 0;
+    room.lockUntil = Date.now() + 10 * 60 * 1000;
+  } else {
+    room.intermissionStartedAt = Date.now();
+    room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
+  }
+  return true;
+}
+
 function updateRoom(room) {
   const now = Date.now();
   const platforms = platformsForRound(currentPlatformsForLevelIndex(room.levelIndex), room.round);
   if (room.buffPickActive) {
-    if (!room.buffPickInputUnlocked && now >= room.buffUnlockAt) {
-      room.buffPickInputUnlocked = true;
+    const deadline = room.buffPickDeadline || room.buffUnlockAt || 0;
+    if (deadline && now >= deadline) {
+      const opts = Array.isArray(room.buffPickOptions) ? room.buffPickOptions : [];
+      const pick = opts[Math.floor(Math.random() * opts.length)];
+      const pl = room.players[room.buffPickLoser];
+      const loadout = pl ? ensurePlayerCardLoadout(pl) : [];
+      const replace =
+        pick && pl && !loadout.includes(pick) && loadout.length >= CARD_LOADOUT_MAX
+          ? loadout[Math.floor(Math.random() * loadout.length)]
+          : null;
+      if (!pick || !settleOnlineBuffPick(room, pick, replace)) {
+        room.buffPickActive = false;
+        room.buffPickInputUnlocked = false;
+        room.buffUnlockAt = 0;
+        room.buffPickDeadline = 0;
+        room.intermissionStartedAt = Date.now();
+        room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
+      }
     }
     return;
   }
@@ -1403,8 +1444,9 @@ function updateRoom(room) {
       room.buffPickLoser = loserIdx;
       room.buffPickOptions = triplet;
       room.buffLastOfferedKey = [...triplet].sort().join("|");
-      room.buffPickInputUnlocked = false;
+      room.buffPickInputUnlocked = true;
       room.buffUnlockAt = Date.now() + BUFF_PICK_GATE_MS;
+      room.buffPickDeadline = room.buffUnlockAt;
       room.lockUntil = Date.now() + 10 * 60 * 1000;
     } else {
       room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
@@ -1450,6 +1492,7 @@ setInterval(() => {
       buffPickActive: room.buffPickActive,
       buffPickLoser: room.buffPickLoser,
       buffPickInputUnlocked: room.buffPickInputUnlocked,
+      buffPickDeadline: room.buffPickDeadline || 0,
       buffPickOptions: room.buffPickOptions,
       roundResult: room.roundResult,
     });
@@ -1809,30 +1852,11 @@ io.on("connection", (socket) => {
 
     socket.on("buff:pick", ({ buffId, replaceBuffId }) => {
       const room = [...rooms.values()].find((r) => r.players.some((p) => p.socketId === socket.id));
-      if (!room || !room.buffPickActive || !room.buffPickInputUnlocked) return;
+      if (!room || !room.buffPickActive) return;
       const loser = room.buffPickLoser;
       if (room.players[loser].socketId !== socket.id) return;
       if (!Array.isArray(room.buffPickOptions) || !room.buffPickOptions.includes(buffId)) return;
-      const pl = room.players[loser];
-      const needKeyBindPause =
-        (buffId === "fireBreath" && !pl.fireBreath) ||
-        (buffId === "groundPound" && !pl.groundPound) ||
-        (buffId === "teleport" && !pl.teleport);
-      const applied = applyBuffToPlayerOnline(pl, buffId, replaceBuffId || null);
-      if (!applied.ok) return;
-      room.buffPickActive = false;
-      room.buffPickInputUnlocked = false;
-      room.buffUnlockAt = 0;
-      if (
-        needKeyBindPause &&
-        (buffId === "fireBreath" || buffId === "groundPound" || buffId === "teleport")
-      ) {
-        room.intermissionStartedAt = 0;
-        room.lockUntil = Date.now() + 10 * 60 * 1000;
-      } else {
-        room.intermissionStartedAt = Date.now();
-        room.lockUntil = room.intermissionStartedAt + ROUND_INTERMISSION_MS;
-      }
+      settleOnlineBuffPick(room, buffId, replaceBuffId || null);
     });
 
     socket.on("fire:bind:done", () => {

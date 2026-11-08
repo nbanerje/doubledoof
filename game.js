@@ -248,9 +248,9 @@ function drawHudOnView() {
 const arcadeExtraEl = document.getElementById("arcadeExtra");
 const FLOOR_Y = 520;
 const PLATFORM_RAISE_PX = 40;
-/** Axis-aligned body: `p.x` left, `p.y` top; feet sit on `plat.y` / `FLOOR_Y`. Matches draw anchor (feet ≈ translateY + 37). */
-const PLAYER_BODY_W = 36;
-const PLAYER_BODY_H = 48;
+/** Axis-aligned body: `p.x` left, `p.y` top; feet sit on `plat.y` / `FLOOR_Y`. */
+const PLAYER_BODY_W = 26;
+const PLAYER_BODY_H = 34;
 /** Keeps the wider fighter graphic inside the canvas when walking to either edge. */
 const PLAYER_SCREEN_PAD = 18;
 function clampPlayerX(x) {
@@ -1369,6 +1369,60 @@ function playerLabelForSetup(playerIdx) {
   return playerIdx === 0 ? "Player 1 (Blue)" : "Player 2 (Red)";
 }
 
+function characterPowerText(opt) {
+  if (opt.id === "knight") {
+    return "Balanced fighter. Sword is a fast 7-damage swing. Staff hits for 20, knocks harder, and recovers slower. Comeback cards add the special powers.";
+  }
+  if (opt.id === "dragon") {
+    return "Fire-aligned fighter with the same sword and staff. After a loss, Fire Breath is offered more often, and only Dragon can take it: hold to breathe flame that damages and slows.";
+  }
+  if (opt.id === "funus") {
+    return "Fungal fighter with the same sword and staff. Special powers come from comeback cards — poisons, traps, and blooms — after you lose a round.";
+  }
+  const pack = (window.AddonCatalog?.ADDON_PACKS || []).find((entry) => entry.id === opt.body);
+  const row = (addonLive?.playable || []).find((entry) => entry.id === opt.id);
+  const kit = (row?.weapons || [])
+    .map((weapon) => {
+      const reach = weapon.rangeScale && weapon.rangeScale !== 1 ? `, ${Number(weapon.rangeScale).toFixed(2)}× reach` : "";
+      const cooldown = weapon.cooldownMs ? `, ${weapon.cooldownMs}ms cooldown` : "";
+      return `${weapon.name}: ${weapon.damage} damage${cooldown}${reach}`;
+    })
+    .join(". ");
+  return `${pack?.blurb || ""} ${kit}`.trim();
+}
+
+function appendLoadoutPreview(preview, opt, isCharacter, index) {
+  if (opt.body && window.Fighters) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 72;
+    canvas.height = 84;
+    canvas.className = "char-tile-canvas";
+    Fighters.paintFighterPreview(canvas, opt.body, opt.color);
+    preview.appendChild(canvas);
+    return;
+  }
+  if (!isCharacter && opt.id !== "sword" && opt.id !== "staff" && window.Fighters) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 96;
+    canvas.height = 48;
+    canvas.className = "char-tile-canvas";
+    Fighters.paintWeaponPreview(canvas, opt.id, opt.theme || "forest");
+    preview.appendChild(canvas);
+    return;
+  }
+  preview.textContent = opt.enabled
+    ? isCharacter
+      ? opt.id === "dragon"
+        ? "D"
+        : opt.id === "funus"
+          ? "F"
+          : "K"
+      : opt.id === "staff"
+        ? "T"
+        : "S"
+    : String(index + 1);
+}
+
 function renderLoadoutSelectScreen(kind, playerIdx) {
   const isCharacter = kind === "character";
   const loadout = activeLoadoutForPlayer(playerIdx);
@@ -1380,59 +1434,97 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
   stepLabelEl.textContent = isCharacter ? "Pick character" : "Pick weapon";
   arcadeTitleEl.textContent = isCharacter ? "Pick Character" : "Pick Weapon";
   arcadeTextEl.textContent = isCharacter
-    ? `${label}: Knight, Dragon, and Funus are always available. Add-on fighters show up when their pack and color are enabled.`
+    ? `${label}: swipe left or right. Each fighter lists its powers. Tap one to choose it.`
     : `${label}: weapons follow the fighter you picked. Core fighters use sword and staff. Add-on fighters use that pack's weapons.`;
   arcadeActionsEl.innerHTML = "";
   arcadeActionsEl.classList.add("arcade-actions--char-pick");
-  arcadeCardEl?.classList.add("arcade-card--wide");
+  arcadeCardEl?.classList.toggle("arcade-card--carousel", isCharacter);
+  arcadeCardEl?.classList.toggle("arcade-card--wide", !isCharacter);
 
-  const grid = document.createElement("div");
-  grid.className = "char-pick-grid";
-  options.forEach((opt, i) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "char-tile";
-    btn.dataset.action = action;
-    btn.dataset.optionId = opt.id;
-    btn.dataset.playerIdx = String(playerIdx);
-    if (!opt.enabled) btn.disabled = true;
-    if (loadout[selectedKey] === opt.id) btn.classList.add("selected");
-    const preview = document.createElement("span");
-    preview.className = `char-tile-preview char-tile-preview--${isCharacter ? "character" : "weapon"}`;
-    if (opt.body && window.Fighters) {
-      const canvas = document.createElement("canvas");
-      canvas.width = 72;
-      canvas.height = 84;
-      canvas.className = "char-tile-canvas";
-      Fighters.paintFighterPreview(canvas, opt.body, opt.color);
-      preview.appendChild(canvas);
-    } else if (!isCharacter && opt.id !== "sword" && opt.id !== "staff" && window.Fighters) {
-      const canvas = document.createElement("canvas");
-      canvas.width = 96;
-      canvas.height = 48;
-      canvas.className = "char-tile-canvas";
-      Fighters.paintWeaponPreview(canvas, opt.id, opt.theme || "forest");
-      preview.appendChild(canvas);
-    } else {
-      preview.textContent = opt.enabled
-        ? isCharacter
-          ? opt.id === "dragon"
-            ? "D"
-            : opt.id === "funus"
-              ? "F"
-              : "K"
-          : opt.id === "staff"
-            ? "T"
-            : "S"
-        : String(i + 1);
-    }
-    const text = document.createElement("span");
-    text.className = "char-tile-label";
-    text.textContent = opt.label;
-    btn.append(preview, text);
-    grid.appendChild(btn);
-  });
-  arcadeActionsEl.appendChild(grid);
+  if (isCharacter) {
+    const scroller = document.createElement("div");
+    scroller.className = "char-carousel";
+    scroller.tabIndex = 0;
+    scroller.setAttribute("aria-label", "Characters, swipe sideways");
+    let selectedSlide = null;
+    options.forEach((opt, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "char-slide";
+      btn.dataset.action = action;
+      btn.dataset.optionId = opt.id;
+      btn.dataset.playerIdx = String(playerIdx);
+      if (!opt.enabled) btn.disabled = true;
+      if (loadout[selectedKey] === opt.id) {
+        btn.classList.add("selected");
+        selectedSlide = btn;
+      }
+      const preview = document.createElement("span");
+      preview.className = "char-tile-preview char-tile-preview--character";
+      appendLoadoutPreview(preview, opt, true, i);
+      const copy = document.createElement("span");
+      copy.className = "char-slide-copy";
+      const text = document.createElement("span");
+      text.className = "char-tile-label";
+      text.textContent = opt.label;
+      const desc = document.createElement("span");
+      desc.className = "char-slide-desc";
+      desc.textContent = characterPowerText(opt);
+      copy.append(text, desc);
+      btn.append(preview, copy);
+      scroller.appendChild(btn);
+    });
+    const count = document.createElement("p");
+    count.className = "char-carousel-count";
+    const paintCount = () => {
+      const width = scroller.clientWidth || 1;
+      const index = Math.min(options.length - 1, Math.max(0, Math.round(scroller.scrollLeft / width)));
+      count.textContent = options.length ? `${index + 1} / ${options.length}` : "";
+    };
+    scroller.addEventListener("scroll", paintCount, { passive: true });
+    const nav = document.createElement("div");
+    nav.className = "char-carousel-nav";
+    const prev = document.createElement("button");
+    prev.type = "button";
+    prev.textContent = "Previous";
+    prev.addEventListener("click", () => {
+      scroller.scrollBy({ left: -scroller.clientWidth, behavior: "smooth" });
+    });
+    const next = document.createElement("button");
+    next.type = "button";
+    next.textContent = "Next";
+    next.addEventListener("click", () => {
+      scroller.scrollBy({ left: scroller.clientWidth, behavior: "smooth" });
+    });
+    nav.append(prev, count, next);
+    arcadeActionsEl.append(scroller, nav);
+    requestAnimationFrame(() => {
+      if (selectedSlide) selectedSlide.scrollIntoView({ inline: "start", block: "nearest" });
+      paintCount();
+    });
+  } else {
+    const grid = document.createElement("div");
+    grid.className = "char-pick-grid";
+    options.forEach((opt, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "char-tile";
+      btn.dataset.action = action;
+      btn.dataset.optionId = opt.id;
+      btn.dataset.playerIdx = String(playerIdx);
+      if (!opt.enabled) btn.disabled = true;
+      if (loadout[selectedKey] === opt.id) btn.classList.add("selected");
+      const preview = document.createElement("span");
+      preview.className = "char-tile-preview char-tile-preview--weapon";
+      appendLoadoutPreview(preview, opt, false, i);
+      const text = document.createElement("span");
+      text.className = "char-tile-label";
+      text.textContent = opt.label;
+      btn.append(preview, text);
+      grid.appendChild(btn);
+    });
+    arcadeActionsEl.appendChild(grid);
+  }
 
   const back = document.createElement("button");
   back.type = "button";
@@ -1894,6 +1986,7 @@ let localState = {
   buffPickActive: false,
   buffPickLoser: 0,
   buffPickInputUnlocked: false,
+  buffPickDeadline: 0,
   buffPickOptions: null,
   /** Sorted id triplet for the last intermission; next pick avoids repeating the same set. */
   buffLastOfferedKey: null,
@@ -1921,13 +2014,28 @@ const touchStickEl = document.getElementById("touchStick");
 const isTouchDevice =
   window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window || navigator.maxTouchPoints > 0;
 
-function lockLandscapeOrientation() {
-  const orientation = screen.orientation;
-  if (!orientation || typeof orientation.lock !== "function") return;
-  orientation.lock("landscape").catch(() => {});
+function enterImmersivePlay() {
+  if (!isTouchDevice || isStandaloneDisplay()) return;
+  const el = document.documentElement;
+  if (document.fullscreenElement || document.webkitFullscreenElement) return;
+  try {
+    if (typeof el.requestFullscreen === "function") {
+      const pending = el.requestFullscreen({ navigationUI: "hide" });
+      if (pending && typeof pending.catch === "function") pending.catch(() => {});
+      return;
+    }
+  } catch {
+    /* Older browsers reject the options object. */
+  }
+  if (typeof el.webkitRequestFullscreen === "function") {
+    try {
+      el.webkitRequestFullscreen();
+    } catch {
+      /* Fullscreen is optional; the landscape layout still fills the page. */
+    }
+  }
 }
-lockLandscapeOrientation();
-window.addEventListener("pointerdown", lockLandscapeOrientation);
+document.addEventListener("pointerdown", enterImmersivePlay);
 const touchState = {
   enabled: isTouchDevice,
   left: false,
@@ -2020,7 +2128,7 @@ function refreshOnlineLobbyIfOpen() {
 
 function renderOnlineLobby() {
   arcadeActionsEl.classList.remove("arcade-actions--char-pick");
-  arcadeCardEl?.classList.remove("arcade-card--wide");
+  arcadeCardEl?.classList.remove("arcade-card--wide", "arcade-card--carousel");
   stepLabelEl.textContent = "Online";
   arcadeTitleEl.textContent = "Play online";
   arcadeTextEl.textContent =
@@ -2072,7 +2180,7 @@ function setArcadeStep(step) {
   teardownRemapWizard();
   clearArcadeExtra();
   arcadeActionsEl.classList.remove("arcade-actions--char-pick");
-  arcadeCardEl?.classList.remove("arcade-card--wide");
+  arcadeCardEl?.classList.remove("arcade-card--wide", "arcade-card--carousel");
 
   if (step === "character_p1" || step === "weapon_p1" || step === "character_p2" || step === "weapon_p2") {
     const playerIdx = step.endsWith("2") ? 1 : 0;
@@ -2131,7 +2239,7 @@ function setArcadeStep(step) {
   arcadeActionsEl.innerHTML = "";
   if (step === "welcome" && isIosBrowser() && !isStandaloneDisplay() && arcadeExtraEl) {
     arcadeExtraEl.innerHTML =
-      '<p class="bind-muted">On iPhone, tap Share, then Add to Home Screen. Hold the phone sideways. The joystick and buttons sit beside the fight, and show once the match starts.</p>';
+      '<p class="bind-muted">The game stays landscape, even if the phone is upright. Tap once to hide Safari’s tabs. Add to Home Screen for a full-screen icon. The joystick and buttons sit beside the fight once the match starts.</p>';
   }
   view.actions.forEach((action) => {
     const btn = document.createElement("button");
@@ -2514,7 +2622,7 @@ function drawPlayer(p) {
       const theme = (characterId.split(":")[1]) || "forest";
       ctx.save();
       ctx.imageSmoothingEnabled = false;
-      ctx.translate(p.x + PLAYER_BODY_W * 0.5 + fac * 16 + freezeVibeX, baseY + 36 + freezeVibeY);
+      ctx.translate(p.x + PLAYER_BODY_W * 0.5 + fac * 12 + freezeVibeX, baseY + PLAYER_BODY_H * 0.72 + freezeVibeY);
       ctx.scale(fac, 1);
       ctx.rotate(0.35);
       Fighters.drawWorldWeapon(ctx, weaponId, theme, 0.2);
@@ -3625,6 +3733,7 @@ function renderFireBreathBindPrompt(message = "") {
   teardownRemapWizard();
   clearArcadeExtra();
   arcadeActionsEl.classList.remove("arcade-actions--char-pick");
+  arcadeCardEl?.classList.remove("arcade-card--wide", "arcade-card--carousel");
   stepLabelEl.textContent = "Fire Breath";
   arcadeTitleEl.textContent = "Map Fire Breath";
   arcadeTextEl.textContent =
@@ -3680,6 +3789,7 @@ function renderGroundPoundBindPrompt(message = "") {
   teardownRemapWizard();
   clearArcadeExtra();
   arcadeActionsEl.classList.remove("arcade-actions--char-pick");
+  arcadeCardEl?.classList.remove("arcade-card--wide", "arcade-card--carousel");
   stepLabelEl.textContent = "Ground Pound";
   arcadeTitleEl.textContent = "Map Ground Pound";
   arcadeTextEl.textContent = "Press the key you want to use for Ground Pound. The round is paused until you choose a key.";
@@ -3763,6 +3873,7 @@ function renderTeleportBindPrompt(message = "") {
   teardownRemapWizard();
   clearArcadeExtra();
   arcadeActionsEl.classList.remove("arcade-actions--char-pick");
+  arcadeCardEl?.classList.remove("arcade-card--wide", "arcade-card--carousel");
   stepLabelEl.textContent = "Teleport";
   arcadeTitleEl.textContent = "Map Teleport";
   arcadeTextEl.textContent = "Press the key you want to use for Teleport. The round is paused until you choose a key.";
@@ -4152,16 +4263,47 @@ function hideBuffPickOverlay() {
     buffAutoPickTimer = null;
   }
   if (buffPickGateTimer != null) {
-    clearTimeout(buffPickGateTimer);
+    clearInterval(buffPickGateTimer);
     buffPickGateTimer = null;
   }
   localState.buffPickInputUnlocked = false;
+  localState.buffPickDeadline = 0;
   pendingBuffReplace = null;
 }
 
-function applyBuffChoice(buffId) {
+function expireLocalBuffPick() {
+  if (mode === "online" || !localState.buffPickActive) return;
+  const loser = localState.buffPickLoser;
+  const opts = localState.buffPickOptions;
+  if (!opts || !opts.length) return;
+  if (pendingBuffReplace?.buffId) {
+    const owned = ensurePlayerCardLoadout(localState.players[loser]);
+    pendingBuffReplace.replaceBuffId =
+      owned.find((id) => id !== pendingBuffReplace.buffId) || owned[0] || null;
+    applyBuffChoice(pendingBuffReplace.buffId, true);
+    return;
+  }
+  const pick = opts[Math.floor(Math.random() * opts.length)];
+  const loadout = ensurePlayerCardLoadout(localState.players[loser]);
+  if (!loadout.includes(pick) && loadout.length >= CARD_LOADOUT_MAX) {
+    pendingBuffReplace = {
+      buffId: pick,
+      replaceBuffId: loadout[Math.floor(Math.random() * loadout.length)],
+    };
+  }
+  applyBuffChoice(pick, true);
+}
+
+function viewerMayChooseBuff() {
+  if (mode === "online") return playerIndex === localState.buffPickLoser;
+  if (mode === "single") return localState.buffPickLoser === 0;
+  return true;
+}
+
+function applyBuffChoice(buffId, fromTimer = false) {
   if (!localState.buffPickActive || !localState.buffPickInputUnlocked) return;
   if (!BUFF_DEFS[buffId]) return;
+  if (!fromTimer && !viewerMayChooseBuff()) return;
   const loser = localState.buffPickLoser;
   const loserPlayer = localState.players[loser];
   const loadout = ensurePlayerCardLoadout(loserPlayer);
@@ -4227,11 +4369,9 @@ function showBuffReplaceChoices(loserIdx, pickedBuffId) {
   const btnWrap = document.getElementById("buffPickButtons");
   const title = document.getElementById("buffPickTitle");
   const sub = document.getElementById("buffPickSub");
-  const gate = document.getElementById("buffPickGateBlock");
   const p = localState.players[loserIdx];
   const owned = ensurePlayerCardLoadout(p);
   if (!btnWrap || !wrap || owned.length === 0) return;
-  if (gate) gate.classList.add("hidden");
   if (title) title.textContent = `Replace a card for ${BUFF_DEFS[pickedBuffId]?.name || "new card"}`;
   if (sub) sub.textContent = "Loadout full (8/8). Pick one card to replace.";
   btnWrap.innerHTML = "";
@@ -4284,6 +4424,7 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
       b.type = "button";
       b.className = "buff-card buff-btn";
       b.setAttribute("data-buff", id);
+      if (!viewerMayChooseBuff()) b.disabled = true;
       b.innerHTML = `<span class="buff-card-face">
         <span class="buff-name">${buffIcon(id)} ${d.name}</span>
         <span class="buff-desc">${d.desc}</span>
@@ -4294,72 +4435,43 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
   }
   const title = document.getElementById("buffPickTitle");
   const sub = document.getElementById("buffPickSub");
-  const gate = document.getElementById("buffPickGateBlock");
+  const timerEl = document.getElementById("buffPickTimer");
   const name = loserIdx === 0 ? "Blue" : "Red";
-  if (title) title.textContent = `${name} lost — choose a comeback buff`;
-  localState.buffPickInputUnlocked = false;
+  if (title) title.textContent = `${name} lost — only ${name} gets a power`;
+  localState.buffPickInputUnlocked = true;
   pendingBuffReplace = null;
-  if (gate) gate.classList.remove("hidden");
+  if (!(localState.buffPickDeadline > Date.now())) {
+    localState.buffPickDeadline = Date.now() + BUFF_PICK_GATE_MS;
+  }
   wrap.classList.remove("hidden");
   if (buffPickGateTimer != null) {
-    clearTimeout(buffPickGateTimer);
+    clearInterval(buffPickGateTimer);
     buffPickGateTimer = null;
   }
-  const gateSub = gate?.querySelector(".buff-pick-gate-sub");
-  let gateSecondsLeft = Math.round(BUFF_PICK_GATE_MS / 1000);
-  const paintGateCountdown = () => {
-    const unit = gateSecondsLeft === 1 ? "second" : "seconds";
-    if (gateSub) gateSub.textContent = `Buff choices unlock in ${gateSecondsLeft} ${unit}.`;
-    if (sub && localState.buffPickActive && !localState.buffPickInputUnlocked) {
-      sub.textContent = `Wait ${gateSecondsLeft} ${unit} without clicking — then pick a card or use A/← · W/↑ · D/→.`;
-    }
-  };
-  const unlockBuffPick = () => {
-    buffPickGateTimer = null;
-    localState.buffPickInputUnlocked = true;
-    if (gate) gate.classList.add("hidden");
-    if (sub && localState.buffPickActive) {
-      sub.textContent =
-        "Buff lasts the rest of the match. Click a card, or A/← (buff 1), W/↑ (buff 2), D/→ (buff 3).";
-    }
-    const firstCard = wrap.querySelector(".buff-card");
-    if (firstCard && typeof firstCard.focus === "function") {
-      requestAnimationFrame(() => firstCard.focus());
-    }
-  };
-  const tickBuffPickGate = () => {
-    if (!localState.buffPickActive) return;
-    if (gateSecondsLeft <= 0) {
-      unlockBuffPick();
-      return;
-    }
-    paintGateCountdown();
-    gateSecondsLeft -= 1;
-    buffPickGateTimer = setTimeout(tickBuffPickGate, 1000);
-  };
-  tickBuffPickGate();
   if (buffAutoPickTimer != null) {
     clearTimeout(buffAutoPickTimer);
     buffAutoPickTimer = null;
   }
-  if (mode === "single" && loserIdx === 1) {
-    buffAutoPickTimer = setTimeout(() => {
-      buffAutoPickTimer = null;
-      const opts = localState.buffPickOptions;
-      if (opts && opts.length) {
-        const pick = opts[Math.floor(Math.random() * opts.length)];
-        const p = localState.players[loserIdx];
-        const loadout = ensurePlayerCardLoadout(p);
-        if (!loadout.includes(pick) && loadout.length >= CARD_LOADOUT_MAX) {
-          pendingBuffReplace = {
-            buffId: pick,
-            replaceBuffId: loadout[Math.floor(Math.random() * loadout.length)],
-          };
-        }
-        applyBuffChoice(pick);
-      }
-    }, BUFF_PICK_GATE_MS + BUFF_BOT_THINK_MS);
-  }
+  const paintBuffCountdown = () => {
+    if (!localState.buffPickActive) return;
+    const msLeft = Math.max(0, (localState.buffPickDeadline || 0) - Date.now());
+    const secondsLeft = Math.ceil(msLeft / 1000);
+    if (timerEl) timerEl.textContent = String(secondsLeft);
+    if (sub && !pendingBuffReplace) {
+      sub.textContent =
+        secondsLeft > 0
+          ? viewerMayChooseBuff()
+            ? `Only ${name} gets this power. ${secondsLeft}s left.`
+            : `Only ${name} gets this power. Waiting ${secondsLeft}s.`
+          : `Time is up. Only ${name} gets a power.`;
+    }
+    if (msLeft > 0) return;
+    clearInterval(buffPickGateTimer);
+    buffPickGateTimer = null;
+    expireLocalBuffPick();
+  };
+  buffPickGateTimer = setInterval(paintBuffCountdown, 200);
+  paintBuffCountdown();
 }
 
 function updateLocalGame() {
@@ -4811,8 +4923,9 @@ function setupSocket() {
       intermissionStartedAt: state.intermissionStartedAt ?? 0,
       buffPickActive: !!state.buffPickActive,
       buffPickLoser: state.buffPickLoser ?? 0,
-      buffPickInputUnlocked: !!state.buffPickInputUnlocked,
+      buffPickInputUnlocked: !!state.buffPickActive || !!state.buffPickInputUnlocked,
       buffPickOptions: Array.isArray(state.buffPickOptions) ? state.buffPickOptions : null,
+      buffPickDeadline: state.buffPickDeadline || localState.buffPickDeadline || 0,
       roundResult: state.roundResult || null,
       levelIndex: Number.isInteger(state.levelIndex) ? state.levelIndex : localState.levelIndex,
     };
@@ -4841,11 +4954,10 @@ function setupSocket() {
       visualState[i].charging = !!localState.players[i]?.charging;
     }
     if (localState.buffPickActive && Array.isArray(localState.buffPickOptions)) {
-      if (!document.getElementById("buffPickOverlay")?.classList.contains("hidden")) return;
-      showBuffPickOverlay(localState.buffPickLoser, localState.buffPickOptions);
-      localState.buffPickInputUnlocked = !!state.buffPickInputUnlocked;
-      const gate = document.getElementById("buffPickGateBlock");
-      if (gate) gate.classList.toggle("hidden", localState.buffPickInputUnlocked);
+      const wrap = document.getElementById("buffPickOverlay");
+      if (wrap?.classList.contains("hidden")) {
+        showBuffPickOverlay(localState.buffPickLoser, localState.buffPickOptions);
+      }
     } else if (!localState.buffPickActive) {
       hideBuffPickOverlay();
     }
@@ -4980,10 +5092,13 @@ window.addEventListener("keydown", (e) => {
     if (e.repeat) return;
     if (!localState.buffPickInputUnlocked) return;
     const bopt = localState.buffPickOptions;
-    if (bopt && bopt[0] && bopt[1] && bopt[2]) {
-      if (e.code === "KeyA" || e.code === "ArrowLeft") applyBuffChoice(bopt[0]);
-      else if (e.code === "KeyW" || e.code === "ArrowUp") applyBuffChoice(bopt[1]);
-      else if (e.code === "KeyD" || e.code === "ArrowRight") applyBuffChoice(bopt[2]);
+    if (bopt && bopt[0] && bopt[1] && bopt[2] && viewerMayChooseBuff()) {
+      const loser = localState.buffPickLoser;
+      const loserKey = (blueCode, redCode) =>
+        mode !== "multi" || (loser === 0 && e.code === blueCode) || (loser === 1 && e.code === redCode);
+      if ((e.code === "KeyA" || e.code === "ArrowLeft") && loserKey("KeyA", "ArrowLeft")) applyBuffChoice(bopt[0]);
+      else if ((e.code === "KeyW" || e.code === "ArrowUp") && loserKey("KeyW", "ArrowUp")) applyBuffChoice(bopt[1]);
+      else if ((e.code === "KeyD" || e.code === "ArrowRight") && loserKey("KeyD", "ArrowRight")) applyBuffChoice(bopt[2]);
     }
     return;
   }
