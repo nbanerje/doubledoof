@@ -1920,6 +1920,14 @@ const touchJoystickEl = document.getElementById("touchJoystick");
 const touchStickEl = document.getElementById("touchStick");
 const isTouchDevice =
   window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window || navigator.maxTouchPoints > 0;
+
+function lockLandscapeOrientation() {
+  const orientation = screen.orientation;
+  if (!orientation || typeof orientation.lock !== "function") return;
+  orientation.lock("landscape").catch(() => {});
+}
+lockLandscapeOrientation();
+window.addEventListener("pointerdown", lockLandscapeOrientation);
 const touchState = {
   enabled: isTouchDevice,
   left: false,
@@ -2123,7 +2131,7 @@ function setArcadeStep(step) {
   arcadeActionsEl.innerHTML = "";
   if (step === "welcome" && isIosBrowser() && !isStandaloneDisplay() && arcadeExtraEl) {
     arcadeExtraEl.innerHTML =
-      '<p class="bind-muted">On iPhone, tap Share, then Add to Home Screen. In portrait the controls sit under the fight. The joystick shows once the match starts.</p>';
+      '<p class="bind-muted">On iPhone, tap Share, then Add to Home Screen. Hold the phone sideways. The joystick and buttons sit beside the fight, and show once the match starts.</p>';
   }
   view.actions.forEach((action) => {
     const btn = document.createElement("button");
