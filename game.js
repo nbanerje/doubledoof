@@ -1309,29 +1309,77 @@ function renderControlChoiceScreen(playerIdx) {
   const name = playerIdx === 0 ? "Player 1 (Blue)" : "Player 2 (Red)";
   stepLabelEl.textContent = "Control setup";
   arcadeTitleEl.textContent = `${name}`;
-  arcadeTextEl.textContent =
-    "Before the round, choose the default layout or map your own keys. You will be asked to press one key for each action.";
+  arcadeTextEl.textContent = isTouchDevice
+    ? "On phone the on-screen stick and buttons are ready. Swipe if you want to remap keys, or Choose Keep default."
+    : "Before the round, choose the default layout or map your own keys. You will be asked to press one key for each action.";
   arcadeActionsEl.innerHTML = "";
   if (arcadeExtraEl) arcadeExtraEl.innerHTML = `<p class="arcade-bind-summary">${describeBindings(playerIdx)}</p>`;
 
-  const keep = document.createElement("button");
-  keep.type = "button";
-  keep.dataset.action = playerIdx === 0 ? "bind0_keep" : "bind1_keep";
-  keep.textContent = "Keep default";
-  arcadeActionsEl.appendChild(keep);
+  if (isTouchDevice) {
+    arcadeCardEl?.classList.add("arcade-card--carousel");
+    arcadeActionsEl.classList.add("arcade-actions--char-pick");
+    const keepId = playerIdx === 0 ? "bind0_keep" : "bind1_keep";
+    const mapId = playerIdx === 0 ? "bind0_map" : "bind1_map";
+    const picker = buildSwipePicker({
+      options: [
+        { id: keepId, label: "Keep default", enabled: true },
+        { id: mapId, label: "Create new mapping", enabled: true },
+      ],
+      selectedId: keepId,
+      ariaLabel: "Control options, swipe sideways",
+      chooseAction: keepId,
+      chooseLabel: (opt) => `Choose ${opt.label}`,
+      buildSlide(opt) {
+        const body = document.createElement("div");
+        body.className = "swipe-picker-slide-body swipe-picker-slide-body--mode";
+        const text = document.createElement("span");
+        text.className = "char-tile-label";
+        text.textContent = opt.label;
+        const desc = document.createElement("span");
+        desc.className = "char-slide-desc";
+        desc.textContent =
+          opt.id === keepId
+            ? "Use the built-in joystick and buttons."
+            : "Map custom keys (mostly for keyboard play).";
+        body.append(text, desc);
+        return body;
+      },
+    });
+    const sync = () => {
+      const selected = picker.getSelected();
+      if (selected) picker.choose.dataset.action = selected.id;
+    };
+    picker.scroller.addEventListener("scroll", sync, { passive: true });
+    sync();
+    if (playerIdx === 1) {
+      const back = document.createElement("button");
+      back.type = "button";
+      back.className = "swipe-picker-back";
+      back.dataset.action = "bind1_back";
+      back.textContent = "Back";
+      picker.actions.insertBefore(back, picker.choose);
+    }
+    arcadeActionsEl.appendChild(picker.root);
+  } else {
+    const keep = document.createElement("button");
+    keep.type = "button";
+    keep.dataset.action = playerIdx === 0 ? "bind0_keep" : "bind1_keep";
+    keep.textContent = "Keep default";
+    arcadeActionsEl.appendChild(keep);
 
-  const map = document.createElement("button");
-  map.type = "button";
-  map.dataset.action = playerIdx === 0 ? "bind0_map" : "bind1_map";
-  map.textContent = "Create new mapping";
-  arcadeActionsEl.appendChild(map);
+    const map = document.createElement("button");
+    map.type = "button";
+    map.dataset.action = playerIdx === 0 ? "bind0_map" : "bind1_map";
+    map.textContent = "Create new mapping";
+    arcadeActionsEl.appendChild(map);
 
-  if (playerIdx === 1) {
-    const back = document.createElement("button");
-    back.type = "button";
-    back.dataset.action = "bind1_back";
-    back.textContent = "Back";
-    arcadeActionsEl.appendChild(back);
+    if (playerIdx === 1) {
+      const back = document.createElement("button");
+      back.type = "button";
+      back.dataset.action = "bind1_back";
+      back.textContent = "Back";
+      arcadeActionsEl.appendChild(back);
+    }
   }
 
   overlayEl.classList.remove("hidden");
@@ -1423,6 +1471,114 @@ function appendLoadoutPreview(preview, opt, isCharacter, index) {
     : String(index + 1);
 }
 
+/**
+ * Horizontal snap carousel. Browse by swipe; confirm with the Choose control.
+ * @param {{
+ *   options: { id: string, enabled?: boolean }[],
+ *   selectedId?: string,
+ *   ariaLabel: string,
+ *   buildSlide: (opt: any, index: number) => HTMLElement,
+ *   chooseLabel?: (opt: any) => string,
+ * }} cfg
+ */
+function buildSwipePicker(cfg) {
+  const options = Array.isArray(cfg.options) ? cfg.options : [];
+  const wrap = document.createElement("div");
+  wrap.className = "swipe-picker";
+
+  const scroller = document.createElement("div");
+  scroller.className = "char-carousel swipe-picker-track";
+  scroller.tabIndex = 0;
+  scroller.setAttribute("aria-label", cfg.ariaLabel || "Swipe to choose");
+
+  const slides = [];
+  let startIndex = 0;
+  options.forEach((opt, i) => {
+    const slide = document.createElement("div");
+    slide.className = "char-slide swipe-picker-slide";
+    slide.setAttribute("role", "option");
+    slide.dataset.optionId = opt.id;
+    if (opt.enabled === false) slide.classList.add("is-disabled");
+    if (cfg.selectedId && cfg.selectedId === opt.id) {
+      slide.classList.add("selected");
+      startIndex = i;
+    }
+    slide.appendChild(cfg.buildSlide(opt, i));
+    scroller.appendChild(slide);
+    slides.push(slide);
+  });
+
+  const footer = document.createElement("div");
+  footer.className = "swipe-picker-footer";
+  const meta = document.createElement("div");
+  meta.className = "swipe-picker-meta";
+  const count = document.createElement("p");
+  count.className = "char-carousel-count swipe-picker-count";
+  const hint = document.createElement("p");
+  hint.className = "swipe-picker-hint";
+  hint.textContent = "Swipe sideways";
+  meta.append(count, hint);
+
+  const dots = document.createElement("div");
+  dots.className = "swipe-picker-dots";
+  dots.setAttribute("aria-hidden", "true");
+  options.forEach((_, i) => {
+    const dot = document.createElement("span");
+    dot.className = "swipe-picker-dot";
+    if (i === startIndex) dot.classList.add("is-active");
+    dots.appendChild(dot);
+  });
+
+  const choose = document.createElement("button");
+  choose.type = "button";
+  choose.className = "swipe-picker-choose";
+  choose.dataset.action = cfg.chooseAction || "swipe_choose";
+
+  const actions = document.createElement("div");
+  actions.className = "swipe-picker-actions";
+  actions.appendChild(choose);
+
+  const paint = () => {
+    const width = scroller.clientWidth || 1;
+    const index = Math.min(options.length - 1, Math.max(0, Math.round(scroller.scrollLeft / width)));
+    const opt = options[index];
+    count.textContent = options.length ? `${index + 1} / ${options.length}` : "";
+    [...dots.children].forEach((dot, i) => dot.classList.toggle("is-active", i === index));
+    slides.forEach((slide, i) => slide.classList.toggle("selected", i === index));
+    if (opt) {
+      choose.dataset.optionId = opt.id;
+      choose.disabled = opt.enabled === false;
+      choose.textContent =
+        typeof cfg.chooseLabel === "function" ? cfg.chooseLabel(opt) : `Choose ${opt.label || opt.id}`;
+    } else {
+      choose.disabled = true;
+      choose.textContent = "Choose";
+    }
+    return index;
+  };
+
+  scroller.addEventListener("scroll", () => paint(), { passive: true });
+  footer.append(meta, dots, actions);
+  wrap.append(scroller, footer);
+
+  requestAnimationFrame(() => {
+    if (slides[startIndex]) scroller.scrollLeft = slides[startIndex].offsetLeft;
+    paint();
+  });
+
+  return {
+    root: wrap,
+    scroller,
+    choose,
+    actions,
+    getSelected() {
+      const width = scroller.clientWidth || 1;
+      const index = Math.min(options.length - 1, Math.max(0, Math.round(scroller.scrollLeft / width)));
+      return options[index] || null;
+    },
+  };
+}
+
 function renderLoadoutSelectScreen(kind, playerIdx) {
   const isCharacter = kind === "character";
   const loadout = activeLoadoutForPlayer(playerIdx);
@@ -1434,105 +1590,65 @@ function renderLoadoutSelectScreen(kind, playerIdx) {
   stepLabelEl.textContent = isCharacter ? "Pick character" : "Pick weapon";
   arcadeTitleEl.textContent = isCharacter ? "Pick Character" : "Pick Weapon";
   arcadeTextEl.textContent = isCharacter
-    ? `${label}: swipe sideways and tap a fighter. Its powers are written on the card.`
-    : `${label}: weapons are listed from the top. Core fighters use sword and staff.`;
+    ? `${label}: swipe to browse. Press Choose when you like the fighter.`
+    : `${label}: swipe to browse weapons, then Choose.`;
   arcadeActionsEl.innerHTML = "";
   arcadeActionsEl.classList.add("arcade-actions--char-pick");
-  arcadeCardEl?.classList.toggle("arcade-card--carousel", isCharacter);
-  arcadeCardEl?.classList.toggle("arcade-card--wide", !isCharacter);
+  arcadeCardEl?.classList.add("arcade-card--carousel");
+  arcadeCardEl?.classList.remove("arcade-card--wide");
 
-  if (isCharacter) {
-    const scroller = document.createElement("div");
-    scroller.className = "char-carousel";
-    scroller.tabIndex = 0;
-    scroller.setAttribute("aria-label", "Characters, swipe sideways");
-    let selectedSlide = null;
-    options.forEach((opt, i) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "char-slide";
-      btn.dataset.action = action;
-      btn.dataset.optionId = opt.id;
-      btn.dataset.playerIdx = String(playerIdx);
-      if (!opt.enabled) btn.disabled = true;
-      if (loadout[selectedKey] === opt.id) {
-        btn.classList.add("selected");
-        selectedSlide = btn;
-      }
+  const picker = buildSwipePicker({
+    options,
+    selectedId: loadout[selectedKey],
+    ariaLabel: isCharacter ? "Characters, swipe sideways" : "Weapons, swipe sideways",
+    chooseAction: action,
+    chooseLabel: (opt) => `Choose ${opt.label || opt.id}`,
+    buildSlide(opt, i) {
+      const body = document.createElement("div");
+      body.className = "swipe-picker-slide-body";
       const preview = document.createElement("span");
-      preview.className = "char-tile-preview char-tile-preview--character";
-      appendLoadoutPreview(preview, opt, true, i);
+      preview.className = `char-tile-preview ${
+        isCharacter ? "char-tile-preview--character" : "char-tile-preview--weapon"
+      }`;
+      appendLoadoutPreview(preview, opt, isCharacter, i);
       const copy = document.createElement("span");
       copy.className = "char-slide-copy";
       const text = document.createElement("span");
       text.className = "char-tile-label";
       text.textContent = opt.label;
-      const desc = document.createElement("span");
-      desc.className = "char-slide-desc";
-      desc.textContent = characterPowerText(opt);
-      copy.append(text, desc);
-      btn.append(preview, copy);
-      scroller.appendChild(btn);
-    });
-    const count = document.createElement("p");
-    count.className = "char-carousel-count";
-    const paintCount = () => {
-      const width = scroller.clientWidth || 1;
-      const index = Math.min(options.length - 1, Math.max(0, Math.round(scroller.scrollLeft / width)));
-      count.textContent = options.length ? `${index + 1} / ${options.length}` : "";
-    };
-    scroller.addEventListener("scroll", paintCount, { passive: true });
-    const nav = document.createElement("div");
-    nav.className = "char-carousel-nav";
-    const prev = document.createElement("button");
-    prev.type = "button";
-    prev.textContent = "Previous";
-    prev.addEventListener("click", () => {
-      scroller.scrollBy({ left: -scroller.clientWidth, behavior: "smooth" });
-    });
-    const next = document.createElement("button");
-    next.type = "button";
-    next.textContent = "Next";
-    next.addEventListener("click", () => {
-      scroller.scrollBy({ left: scroller.clientWidth, behavior: "smooth" });
-    });
-    nav.append(prev, count, next);
-    arcadeActionsEl.append(scroller, nav);
-    requestAnimationFrame(() => {
-      if (selectedSlide) scroller.scrollLeft = selectedSlide.offsetLeft;
-      paintCount();
-    });
-  } else {
-    const grid = document.createElement("div");
-    grid.className = "char-pick-grid";
-    options.forEach((opt, i) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "char-tile";
-      btn.dataset.action = action;
-      btn.dataset.optionId = opt.id;
-      btn.dataset.playerIdx = String(playerIdx);
-      if (!opt.enabled) btn.disabled = true;
-      if (loadout[selectedKey] === opt.id) btn.classList.add("selected");
-      const preview = document.createElement("span");
-      preview.className = "char-tile-preview char-tile-preview--weapon";
-      appendLoadoutPreview(preview, opt, false, i);
-      const text = document.createElement("span");
-      text.className = "char-tile-label";
-      text.textContent = opt.label;
-      btn.append(preview, text);
-      grid.appendChild(btn);
-    });
-    arcadeActionsEl.appendChild(grid);
-  }
+      copy.appendChild(text);
+      if (isCharacter) {
+        const desc = document.createElement("span");
+        desc.className = "char-slide-desc";
+        desc.textContent = characterPowerText(opt);
+        copy.appendChild(desc);
+      } else {
+        const desc = document.createElement("span");
+        desc.className = "char-slide-desc";
+        const stats = weaponStatsForId(opt.id);
+        desc.textContent = stats
+          ? `${stats.damage} damage` +
+            (stats.cooldownMs ? `, ${stats.cooldownMs}ms cooldown` : "") +
+            (stats.rangeScale && stats.rangeScale !== 1 ? `, ${Number(stats.rangeScale).toFixed(2)}× reach` : "")
+          : opt.label;
+        copy.appendChild(desc);
+      }
+      body.append(preview, copy);
+      return body;
+    },
+  });
+  picker.choose.dataset.playerIdx = String(playerIdx);
 
   const back = document.createElement("button");
   back.type = "button";
+  back.className = "swipe-picker-back";
   back.dataset.action = "loadout_back";
   back.dataset.kind = kind;
   back.dataset.playerIdx = String(playerIdx);
   back.textContent = "Back";
-  arcadeActionsEl.appendChild(back);
+  picker.actions.insertBefore(back, picker.choose);
+
+  arcadeActionsEl.appendChild(picker.root);
 
   if (arcadeExtraEl) {
     arcadeExtraEl.innerHTML = `<p class="arcade-bind-summary">${label}: ${escapeHtml(loadout.character)} + ${escapeHtml(loadout.weapon)}</p>`;
@@ -2369,13 +2485,54 @@ function setArcadeStep(step) {
     arcadeExtraEl.innerHTML =
       '<p class="bind-muted">The game stays landscape, even if the phone is upright. The page scrolls down a little so Safari’s bars tuck away. Add to Home Screen for a full-screen icon. The joystick and buttons sit beside the fight once the match starts.</p>';
   }
-  view.actions.forEach((action) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.dataset.action = action.id;
-    btn.textContent = action.label;
-    arcadeActionsEl.appendChild(btn);
-  });
+  const useSwipeActions = isTouchDevice && view.actions.length > 1;
+  if (useSwipeActions) {
+    arcadeCardEl?.classList.add("arcade-card--carousel");
+    arcadeActionsEl.classList.add("arcade-actions--char-pick");
+    arcadeTextEl.textContent = `${view.text} Swipe, then Choose.`;
+    const picker = buildSwipePicker({
+      options: view.actions.map((action) => ({
+        id: action.id,
+        label: action.label,
+        enabled: true,
+      })),
+      ariaLabel: `${view.title}, swipe sideways`,
+      chooseAction: view.actions[0]?.id || "next",
+      chooseLabel: (opt) => `Choose ${opt.label}`,
+      buildSlide(opt) {
+        const body = document.createElement("div");
+        body.className = "swipe-picker-slide-body swipe-picker-slide-body--mode";
+        const text = document.createElement("span");
+        text.className = "char-tile-label";
+        text.textContent = opt.label;
+        const desc = document.createElement("span");
+        desc.className = "char-slide-desc";
+        desc.textContent =
+          opt.id === "single"
+            ? "Fight the computer."
+            : opt.id === "multi"
+              ? "Two players on this phone or keyboard."
+              : "Challenge a friend online.";
+        body.append(text, desc);
+        return body;
+      },
+    });
+    const syncModeAction = () => {
+      const selected = picker.getSelected();
+      if (selected) picker.choose.dataset.action = selected.id;
+    };
+    picker.scroller.addEventListener("scroll", syncModeAction, { passive: true });
+    syncModeAction();
+    arcadeActionsEl.appendChild(picker.root);
+  } else {
+    view.actions.forEach((action) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.action = action.id;
+      btn.textContent = action.label;
+      arcadeActionsEl.appendChild(btn);
+    });
+  }
   overlayEl.classList.remove("hidden");
 }
 
@@ -4501,29 +4658,41 @@ function showBuffReplaceChoices(loserIdx, pickedBuffId) {
   const owned = ensurePlayerCardLoadout(p);
   if (!btnWrap || !wrap || owned.length === 0) return;
   if (title) title.textContent = `Replace a card for ${BUFF_DEFS[pickedBuffId]?.name || "new card"}`;
-  if (sub) sub.textContent = "Loadout full (8/8). Pick one card to replace.";
+  if (sub) sub.textContent = "Loadout full (8/8). Swipe to a card, then Replace.";
   btnWrap.innerHTML = "";
-  for (const id of owned) {
-    const d = BUFF_DEFS[id];
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "buff-card buff-btn";
-    b.setAttribute("data-replace-buff", id);
-    b.innerHTML = `<span class="buff-card-face">
-      <span class="buff-name">${buffIcon(id)} ${d?.name || id}</span>
-      <span class="buff-desc">${d?.desc || ""}</span>
-    </span>`;
-    btnWrap.appendChild(b);
-  }
+  btnWrap.classList.add("buff-pick-buttons--swipe");
+  const options = owned.map((id) => ({
+    id,
+    label: BUFF_DEFS[id]?.name || id,
+    enabled: true,
+    desc: BUFF_DEFS[id]?.desc || "",
+  }));
+  const picker = buildSwipePicker({
+    options,
+    ariaLabel: "Cards to replace, swipe sideways",
+    chooseAction: "buff_replace_choose",
+    chooseLabel: (opt) => `Replace ${opt.label}`,
+    buildSlide(opt) {
+      const face = document.createElement("span");
+      face.className = "buff-card-face";
+      face.innerHTML = `<span class="buff-name">${buffIcon(opt.id)} ${opt.label}</span>
+        <span class="buff-desc">${opt.desc}</span>`;
+      return face;
+    },
+  });
+  picker.choose.setAttribute("data-replace-buff", options[0]?.id || "");
+  const syncReplace = () => {
+    const selected = picker.getSelected();
+    if (selected) picker.choose.setAttribute("data-replace-buff", selected.id);
+  };
+  picker.scroller.addEventListener("scroll", syncReplace, { passive: true });
   const cancel = document.createElement("button");
   cancel.type = "button";
-  cancel.className = "buff-card buff-btn";
+  cancel.className = "swipe-picker-back";
   cancel.setAttribute("data-replace-cancel", "1");
-  cancel.innerHTML = `<span class="buff-card-face">
-    <span class="buff-name">↩️ Cancel</span>
-    <span class="buff-desc">Go back to the 3 choices</span>
-  </span>`;
-  btnWrap.appendChild(cancel);
+  cancel.textContent = "Cancel";
+  picker.actions.insertBefore(cancel, picker.choose);
+  btnWrap.appendChild(picker.root);
   wrap.classList.remove("hidden");
 }
 
@@ -4538,28 +4707,49 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
   localState.buffPickOptions = triplet;
   localState.buffLastOfferedKey = key;
   const btnWrap = document.getElementById("buffPickButtons");
+  const keyRows = [
+    { k1: "A", k2: "←" },
+    { k1: "W", k2: "↑" },
+    { k1: "D", k2: "→" },
+  ];
   if (btnWrap) {
     btnWrap.innerHTML = "";
-    const keyRows = [
-      { k1: "A", k2: "←" },
-      { k1: "W", k2: "↑" },
-      { k1: "D", k2: "→" },
-    ];
-    for (let i = 0; i < 3; i += 1) {
-      const id = triplet[i];
-      const d = BUFF_DEFS[id];
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "buff-card buff-btn";
-      b.setAttribute("data-buff", id);
-      if (!viewerMayChooseBuff()) b.disabled = true;
-      b.innerHTML = `<span class="buff-card-face">
-        <span class="buff-name">${buffIcon(id)} ${d.name}</span>
-        <span class="buff-desc">${d.desc}</span>
-        <span class="buff-keys" aria-label="Shortcuts"><kbd>${keyRows[i].k1}</kbd><kbd>${keyRows[i].k2}</kbd></span>
-      </span>`;
-      btnWrap.appendChild(b);
+    btnWrap.classList.add("buff-pick-buttons--swipe");
+    const options = triplet.map((id, i) => ({
+      id,
+      label: BUFF_DEFS[id]?.name || id,
+      enabled: viewerMayChooseBuff(),
+      desc: BUFF_DEFS[id]?.desc || "",
+      keys: keyRows[i],
+    }));
+    const picker = buildSwipePicker({
+      options,
+      ariaLabel: "Comeback powers, swipe sideways",
+      chooseAction: "buff_swipe_choose",
+      chooseLabel: (opt) => `Take ${opt.label}`,
+      buildSlide(opt) {
+        const face = document.createElement("span");
+        face.className = "buff-card-face";
+        face.innerHTML = `<span class="buff-name">${buffIcon(opt.id)} ${opt.label}</span>
+          <span class="buff-desc">${opt.desc}</span>
+          <span class="buff-keys" aria-label="Shortcuts"><kbd>${opt.keys.k1}</kbd><kbd>${opt.keys.k2}</kbd></span>`;
+        return face;
+      },
+    });
+    const syncBuff = () => {
+      const selected = picker.getSelected();
+      if (selected) {
+        picker.choose.setAttribute("data-buff", selected.id);
+        picker.choose.disabled = !viewerMayChooseBuff() || selected.enabled === false;
+      }
+    };
+    picker.scroller.addEventListener("scroll", syncBuff, { passive: true });
+    syncBuff();
+    if (!viewerMayChooseBuff()) {
+      picker.choose.disabled = true;
+      picker.choose.textContent = "Waiting for loser";
     }
+    btnWrap.appendChild(picker.root);
   }
   const title = document.getElementById("buffPickTitle");
   const sub = document.getElementById("buffPickSub");
@@ -4589,7 +4779,7 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
       sub.textContent =
         secondsLeft > 0
           ? viewerMayChooseBuff()
-            ? `Only ${name} gets this power. ${secondsLeft}s left.`
+            ? `Swipe a power, then Take. ${secondsLeft}s left.`
             : `Only ${name} gets this power. Waiting ${secondsLeft}s.`
           : `Time is up. Only ${name} gets a power.`;
     }

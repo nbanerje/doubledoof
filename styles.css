@@ -507,7 +507,8 @@ button:hover {
   display: none;
 }
 
-button.char-slide {
+button.char-slide,
+.char-slide.swipe-picker-slide {
   flex: 0 0 100%;
   min-width: 100%;
   scroll-snap-align: start;
@@ -524,12 +525,14 @@ button.char-slide {
   background: linear-gradient(180deg, #1a2540, #141c32);
 }
 
-button.char-slide.selected {
+button.char-slide.selected,
+.char-slide.swipe-picker-slide.selected {
   border-color: #f6c95a;
   background: linear-gradient(180deg, #33415f, #1f2c4a);
 }
 
-button.char-slide:disabled {
+button.char-slide:disabled,
+.char-slide.swipe-picker-slide.is-disabled {
   cursor: not-allowed;
   opacity: 0.48;
 }
@@ -565,6 +568,130 @@ button.char-slide:disabled {
 
 .char-carousel-nav button {
   min-width: 96px;
+}
+
+.swipe-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.swipe-picker-track {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: 100%;
+}
+
+.swipe-picker-slide {
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.swipe-picker-slide-body {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: 0;
+}
+
+.swipe-picker-slide-body--mode {
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 96px;
+  padding: 4px 2px;
+}
+
+.swipe-picker-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.swipe-picker-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.swipe-picker-hint {
+  margin: 0;
+  color: #8fa4d8;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.swipe-picker-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  min-height: 10px;
+}
+
+.swipe-picker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(158, 181, 237, 0.35);
+}
+
+.swipe-picker-dot.is-active {
+  background: #f6c95a;
+}
+
+.swipe-picker-actions {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.swipe-picker-back,
+.swipe-picker-choose {
+  min-height: 44px;
+  min-width: 0;
+}
+
+.swipe-picker-back {
+  flex: 0 0 auto;
+}
+
+.swipe-picker-choose {
+  flex: 1 1 auto;
+  font-weight: 700;
+  border-color: #f6c95a;
+  background: linear-gradient(180deg, #3a4d78, #24345a);
+}
+
+.buff-pick-buttons--swipe {
+  display: block;
+  grid-template-columns: none;
+}
+
+.buff-pick-buttons--swipe .swipe-picker {
+  min-height: 0;
+}
+
+.buff-pick-buttons--swipe .swipe-picker-slide {
+  border: 2px solid rgba(100, 130, 200, 0.55);
+  border-radius: 14px;
+  background: linear-gradient(165deg, #2a3860 0%, #1e2a48 55%, #162038 100%);
+  padding: 4px;
+}
+
+.buff-pick-buttons--swipe .buff-card-face {
+  min-height: 0;
+  height: 100%;
+  border: none;
+  box-shadow: none;
+  background: transparent;
 }
 
 .char-pick-grid {
@@ -720,10 +847,11 @@ button.char-tile:not(:disabled):hover {
   touch-action: manipulation;
 }
 
-.arcade-actions button.char-slide {
+.arcade-actions button.char-slide,
+.arcade-actions .char-slide.swipe-picker-slide {
   min-width: 100%;
   flex: 0 0 100%;
-  touch-action: pan-x pan-y;
+  touch-action: pan-x;
 }
 
 .hidden {
@@ -1031,77 +1159,82 @@ button.lobby-decline {
     overscroll-behavior: contain;
   }
 
-  .char-carousel,
-  button.char-slide {
-    touch-action: pan-x pan-y;
+  .arcade-card--carousel,
+  .buff-pick-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-height: 100%;
+    overflow: hidden;
   }
 
-  .arcade-card--wide .char-pick-grid {
-    align-content: start;
+  .arcade-card--carousel .arcade-actions,
+  .buff-pick-shell .buff-pick-stage {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .arcade-card--carousel #arcadeExtra,
+  .arcade-card--carousel .arcade-extra {
+    display: none;
+  }
+
+  .char-carousel,
+  .swipe-picker-track,
+  .swipe-picker-slide {
+    touch-action: pan-x;
+  }
+
+  .char-carousel-nav {
+    display: none;
   }
 
   .arcade-card h2,
   .buff-pick-shell h3 {
-    font-size: 1rem;
-    margin-bottom: 4px;
+    font-size: 0.95rem;
+    margin-bottom: 2px;
   }
 
   .arcade-step {
-    margin-bottom: 4px;
+    margin-bottom: 2px;
+    font-size: 0.68rem;
   }
 
   .arcade-card p,
   .char-slide-desc,
   .arcade-extra,
   .buff-pick-shell > p {
-    font-size: 0.75rem;
-    margin-bottom: 6px;
-    line-height: 1.3;
+    font-size: 0.7rem;
+    margin-bottom: 4px;
+    line-height: 1.25;
   }
 
-  .arcade-actions button {
+  .arcade-actions button,
+  .swipe-picker-back,
+  .swipe-picker-choose {
     min-width: 0;
-    min-height: 40px;
-  }
-
-  .arcade-actions > button[data-action="loadout_back"] {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    background: #1b2a4f;
-  }
-
-  button.char-slide {
-    align-items: flex-start;
-    gap: 8px;
-    padding: 8px;
+    min-height: 42px;
   }
 
   .char-tile-preview--character,
   .char-tile-preview--weapon {
-    width: 52px;
+    width: 48px;
     height: 40px;
     flex: 0 0 auto;
   }
 
-  .char-pick-grid {
-    grid-template-columns: 1fr;
-    align-content: start;
-    justify-items: stretch;
+  .swipe-picker-slide {
+    padding: 8px;
   }
 
-  button.char-tile {
-    flex-direction: row;
-    justify-content: flex-start;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    min-height: 44px;
+  .swipe-picker-slide-body--mode {
+    min-height: 72px;
   }
 
   .buff-pick-shell {
-    display: flex;
-    flex-direction: column;
     container-type: inline-size;
   }
 
@@ -1111,13 +1244,16 @@ button.lobby-decline {
   }
 
   .buff-pick-timer {
-    font-size: 0.95rem;
-    margin-bottom: 4px;
+    font-size: 0.9rem;
+    margin-bottom: 2px;
   }
 
-  .buff-pick-buttons {
-    grid-template-columns: 1fr;
-    gap: 8px;
+  .buff-pick-buttons,
+  .buff-pick-buttons--swipe {
+    display: block;
+    grid-template-columns: none;
+    height: 100%;
+    min-height: 0;
   }
 
   .buff-card.buff-btn,
@@ -1139,12 +1275,16 @@ button.lobby-decline {
   }
 
   .buff-name {
-    font-size: 0.95rem;
+    font-size: 0.92rem;
   }
 
   .buff-desc {
     margin-top: 4px;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 5;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .buff-keys {
