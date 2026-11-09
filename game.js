@@ -1519,13 +1519,17 @@ function appendLoadoutPreview(preview, opt, isCharacter, index) {
     : String(index + 1);
 }
 
-/** Portrait phones CSS-rotate `.app` 90deg; map screen deltas into carousel scroll. */
+/** Portrait phones CSS-rotate `.app` 90deg (CW); map viewport deltas into carousel local-X. */
 function isCssRotatedPhoneLayout() {
   if (!isTouchDevice) return false;
   if (document.documentElement.classList.contains("safari-isl-active")) return false;
   return window.matchMedia("(orientation: portrait)").matches && window.matchMedia("(pointer: coarse)").matches;
 }
 
+/**
+ * Finger delta along the carousel's local X axis (positive = visual right).
+ * rotate(90deg) CW maps local +X → viewport +Y, so portrait uses dy.
+ */
 function swipeAxisDelta(dx, dy) {
   return isCssRotatedPhoneLayout() ? dy : dx;
 }
@@ -1705,14 +1709,14 @@ function buildSwipePicker(cfg) {
   };
 
   /** Pick target page from release velocity + drag distance (UIScrollView paging). */
-  const targetIndexFromGesture = (startPage, axisDelta, velocity, inverted) => {
+  const targetIndexFromGesture = (startPage, axisDelta, velocity) => {
     const width = slideWidth();
-    // Map finger delta into scrollLeft space (CSS-rotated phones invert axes).
-    const scrollDelta = inverted ? axisDelta : -axisDelta;
+    // Finger-follows content: local +X (visual right) decreases scrollLeft.
+    const scrollDelta = -axisDelta;
 
     // Fast flick: advance one page in the flick direction, even from a short drag.
     if (Math.abs(velocity) >= FLICK_VELOCITY) {
-      const flickDir = inverted ? Math.sign(velocity) : -Math.sign(velocity);
+      const flickDir = -Math.sign(velocity);
       if (flickDir < 0) return clampIndex(startPage - 1);
       if (flickDir > 0) return clampIndex(startPage + 1);
     }
@@ -1724,14 +1728,44 @@ function buildSwipePicker(cfg) {
     return startPage;
   };
 
-  // Native overflow-x often fails under the phone CSS rotate; drive with pointer + velocity.
+  // Drive paging with window-level pointers (setPointerCapture is flaky on iOS WKWebView /
+  // Safari, and lostpointercapture was aborting drags immediately).
   let drag = null;
-  const endDrag = (ev) => {
-    if (!drag || (ev && drag.pointerId != null && ev.pointerId !== drag.pointerId)) return;
+  const detachDragListeners = () => {
+    window.removeEventListener("pointermove", onDragMove);
+    window.removeEventListener("pointerup", onDragEnd);
+    window.removeEventListener("pointercancel", onDragEnd);
+    window.removeEventListener("touchmove", onDragTouchMove);
+    window.removeEventListener("touchend", onDragTouchEnd);
+    window.removeEventListener("touchcancel", onDragTouchEnd);
+  };
+
+  const applyDragAxis = (axis, clientX, clientY) => {
+    if (!drag) return;
+    drag.lastX = clientX;
+    drag.lastY = clientY;
+    drag.axisTotal += axis;
     const now = performance.now();
+    drag.samples.push({ t: now, axis: drag.axisTotal });
+    while (drag.samples.length > 12 || (drag.samples[0] && now - drag.samples[0].t > 100)) {
+      drag.samples.shift();
+    }
+    // Rubber-band slightly past ends while dragging (UIScrollView feel).
+    const width = slideWidth();
+    let next = drag.startScroll - drag.axisTotal;
+    const min = 0;
+    const max = Math.max(0, (options.length - 1) * width);
+    if (next < min) next = min + (next - min) * 0.35;
+    if (next > max) next = max + (next - max) * 0.35;
+    scroller.scrollLeft = next;
+  };
+
+  const finishDrag = (ev) => {
+    if (!drag) return;
+    const active = drag;
     // Velocity from recent samples (last ~80ms), Core Animation style.
     let velocity = 0;
-    const samples = drag.samples;
+    const samples = active.samples;
     if (samples.length >= 2) {
       const latest = samples[samples.length - 1];
       let earliest = samples[0];
@@ -1742,14 +1776,10 @@ function buildSwipePicker(cfg) {
       const dt = Math.max(1, latest.t - earliest.t);
       velocity = (latest.axis - earliest.axis) / dt;
     }
-    const target = targetIndexFromGesture(drag.startPage, drag.axisTotal, velocity, drag.inverted);
-    const moved = Math.abs(drag.axisTotal) > 8 || Math.abs(velocity) >= FLICK_VELOCITY;
-    try {
-      scroller.releasePointerCapture?.(drag.pointerId);
-    } catch (_) {
-      /* ignore */
-    }
+    const target = targetIndexFromGesture(active.startPage, active.axisTotal, velocity);
+    const moved = Math.abs(active.axisTotal) > 8 || Math.abs(velocity) >= FLICK_VELOCITY;
     drag = null;
+    detachDragListeners();
     scroller.classList.remove("is-dragging");
     animateTo(target, velocity);
     if (moved && ev) {
@@ -1758,65 +1788,88 @@ function buildSwipePicker(cfg) {
     }
   };
 
+  const onDragMove = (ev) => {
+    if (!drag || ev.pointerId !== drag.pointerId) return;
+    const dx = ev.clientX - drag.lastX;
+    const dy = ev.clientY - drag.lastY;
+    applyDragAxis(swipeAxisDelta(dx, dy), ev.clientX, ev.clientY);
+    if (Math.abs(drag.axisTotal) > 4) ev.preventDefault();
+  };
+
+  const onDragEnd = (ev) => {
+    if (!drag || (ev.pointerId != null && ev.pointerId !== drag.pointerId)) return;
+    finishDrag(ev);
+  };
+
+  // Touch fallback: some iOS builds deliver touch* more reliably than pointer*.
+  const onDragTouchMove = (ev) => {
+    if (!drag) return;
+    // Even when Pointer Events own the drag, block native scroll on iOS touchmove.
+    if (drag.pointerId != null) {
+      if (Math.abs(drag.axisTotal) > 4) ev.preventDefault();
+      return;
+    }
+    const t = ev.changedTouches?.[0] || ev.touches?.[0];
+    if (!t || (drag.touchId != null && t.identifier !== drag.touchId)) return;
+    const dx = t.clientX - drag.lastX;
+    const dy = t.clientY - drag.lastY;
+    applyDragAxis(swipeAxisDelta(dx, dy), t.clientX, t.clientY);
+    if (Math.abs(drag.axisTotal) > 4) ev.preventDefault();
+  };
+
+  const onDragTouchEnd = (ev) => {
+    if (!drag || drag.pointerId != null) return;
+    const t = ev.changedTouches?.[0];
+    if (t && drag.touchId != null && t.identifier !== drag.touchId) return;
+    finishDrag(ev);
+  };
+
+  const beginDrag = (clientX, clientY, ids) => {
+    stopAnim();
+    pageIndex = clampIndex(Math.round(scroller.scrollLeft / slideWidth()));
+    drag = {
+      pointerId: ids.pointerId,
+      touchId: ids.touchId,
+      lastX: clientX,
+      lastY: clientY,
+      startScroll: scroller.scrollLeft,
+      startPage: pageIndex,
+      axisTotal: 0,
+      samples: [{ t: performance.now(), axis: 0 }],
+    };
+    scroller.classList.add("is-dragging");
+    scroller.classList.remove("is-settling");
+    window.addEventListener("pointermove", onDragMove, { passive: false });
+    window.addEventListener("pointerup", onDragEnd);
+    window.addEventListener("pointercancel", onDragEnd);
+    window.addEventListener("touchmove", onDragTouchMove, { passive: false });
+    window.addEventListener("touchend", onDragTouchEnd);
+    window.addEventListener("touchcancel", onDragTouchEnd);
+  };
+
   scroller.addEventListener(
     "pointerdown",
     (ev) => {
       if (ev.button != null && ev.button !== 0) return;
       if (ev.target instanceof Element && ev.target.closest("button,a,input")) return;
-      stopAnim();
-      pageIndex = clampIndex(Math.round(scroller.scrollLeft / slideWidth()));
-      drag = {
-        pointerId: ev.pointerId,
-        lastX: ev.clientX,
-        lastY: ev.clientY,
-        startScroll: scroller.scrollLeft,
-        startPage: pageIndex,
-        axisTotal: 0,
-        inverted: isCssRotatedPhoneLayout(),
-        samples: [{ t: performance.now(), axis: 0 }],
-      };
-      scroller.classList.add("is-dragging");
-      scroller.classList.remove("is-settling");
-      try {
-        scroller.setPointerCapture(ev.pointerId);
-      } catch (_) {
-        /* ignore */
-      }
+      if (drag) return;
+      beginDrag(ev.clientX, ev.clientY, { pointerId: ev.pointerId, touchId: null });
     },
     { passive: true }
   );
 
   scroller.addEventListener(
-    "pointermove",
+    "touchstart",
     (ev) => {
-      if (!drag || ev.pointerId !== drag.pointerId) return;
-      const dx = ev.clientX - drag.lastX;
-      const dy = ev.clientY - drag.lastY;
-      drag.lastX = ev.clientX;
-      drag.lastY = ev.clientY;
-      const axis = swipeAxisDelta(dx, dy);
-      drag.axisTotal += axis;
-      const now = performance.now();
-      drag.samples.push({ t: now, axis: drag.axisTotal });
-      while (drag.samples.length > 12 || (drag.samples[0] && now - drag.samples[0].t > 100)) {
-        drag.samples.shift();
-      }
-      // Rubber-band slightly past ends while dragging (UIScrollView feel).
-      const width = slideWidth();
-      let next = drag.startScroll + (drag.inverted ? 1 : -1) * drag.axisTotal;
-      const min = 0;
-      const max = Math.max(0, (options.length - 1) * width);
-      if (next < min) next = min + (next - min) * 0.35;
-      if (next > max) next = max + (next - max) * 0.35;
-      scroller.scrollLeft = next;
-      if (Math.abs(drag.axisTotal) > 4) ev.preventDefault();
+      // Only used when Pointer Events did not already start the drag (older iOS / quirks).
+      if (drag) return;
+      if (ev.target instanceof Element && ev.target.closest("button,a,input")) return;
+      const t = ev.changedTouches?.[0];
+      if (!t) return;
+      beginDrag(t.clientX, t.clientY, { pointerId: null, touchId: t.identifier });
     },
-    { passive: false }
+    { passive: true }
   );
-
-  scroller.addEventListener("pointerup", endDrag);
-  scroller.addEventListener("pointercancel", endDrag);
-  scroller.addEventListener("lostpointercapture", endDrag);
 
   prevBtn.addEventListener("click", (ev) => {
     ev.preventDefault();
