@@ -2500,21 +2500,51 @@ function enterImmersivePlay() {
 }
 document.addEventListener("pointerdown", () => enterImmersivePlay(), { passive: true });
 
-const touchState = {
-  enabled: isTouchDevice,
-  left: false,
-  right: false,
-  jump: false,
-  attack: false,
-  orb: false,
-  fire: false,
-  prevLeft: false,
-  prevRight: false,
-  prevJump: false,
-  prevAttack: false,
-  prevOrb: false,
-  prevFire: false,
-};
+function createTouchPad() {
+  return {
+    left: false,
+    right: false,
+    jump: false,
+    attack: false,
+    orb: false,
+    fire: false,
+    prevLeft: false,
+    prevRight: false,
+    prevJump: false,
+    prevAttack: false,
+    prevOrb: false,
+    prevFire: false,
+  };
+}
+/** Pad 0 = Blue / online local; pad 1 = Red (local multi only). */
+const touchPads = [createTouchPad(), createTouchPad()];
+const touchState = touchPads[0];
+touchState.enabled = isTouchDevice;
+
+/** Screen delta → stick local axes (CSS rotate(90deg) maps visual +X to screen +Y). */
+function stickAxesFromClientDelta(dx, dy) {
+  if (isCssRotatedPhoneLayout()) return { x: dy, y: -dx };
+  return { x: dx, y: dy };
+}
+
+function snapshotTouchPad(pad) {
+  pad.prevLeft = pad.left;
+  pad.prevRight = pad.right;
+  pad.prevJump = pad.jump;
+  pad.prevAttack = pad.attack;
+  pad.prevOrb = pad.orb;
+  pad.prevFire = pad.fire;
+}
+
+function clearTouchPad(pad) {
+  pad.left = false;
+  pad.right = false;
+  pad.jump = false;
+  pad.attack = false;
+  pad.orb = false;
+  pad.fire = false;
+  snapshotTouchPad(pad);
+}
 
 const screenShakeState = {
   until: 0,
@@ -2556,9 +2586,17 @@ function refreshTouchOverlayVisibility() {
   const visible =
     touchState.enabled && overlayEl.classList.contains("hidden") && !settingsDrawerEl.classList.contains("open");
   touchOverlayEl.classList.toggle("hidden", !visible);
-  const fireBtn = touchOverlayEl.querySelector('[data-touch-action="fire"]');
-  const localPlayer = mode === "online" ? localState.players[playerIndex] : localState.players[0];
-  if (fireBtn) fireBtn.classList.toggle("hidden", !visible || !localPlayer?.fireBreath);
+  const dual = visible && mode === "multi";
+  touchOverlayEl.classList.toggle("touch-overlay--multi", dual);
+  touchOverlayEl.querySelectorAll(".touch-p2-only").forEach((el) => {
+    el.classList.toggle("hidden", !dual);
+  });
+  const fire0 = touchOverlayEl.querySelector('[data-touch-player="0"][data-touch-action="fire"]');
+  const fire1 = touchOverlayEl.querySelector('[data-touch-player="1"][data-touch-action="fire"]');
+  const p0 = mode === "online" ? localState.players[playerIndex] : localState.players[0];
+  const p1 = localState.players[1];
+  if (fire0) fire0.classList.toggle("hidden", !visible || !p0?.fireBreath);
+  if (fire1) fire1.classList.toggle("hidden", !dual || !p1?.fireBreath);
 }
 
 function showBanner(text, durationMs = 1200) {
@@ -2914,8 +2952,9 @@ function dragonRunInputDirection(idx, p, v) {
 
   if (idx === 0 || mode === "multi") {
     const b = idx === 0 ? keyBindings.p0 : keyBindings.p1;
-    const left = keys.has(b.left) || (idx === 0 && touchState.left);
-    const right = keys.has(b.right) || (idx === 0 && touchState.right);
+    const pad = touchPads[idx] || touchPads[0];
+    const left = keys.has(b.left) || pad.left;
+    const right = keys.has(b.right) || pad.right;
     if (left !== right) return left ? -1 : 1;
     if (Math.abs(p.vx || 0) > 0.1) return Math.sign(p.vx);
     return 0;
@@ -3411,47 +3450,39 @@ function render() {
   requestAnimationFrame(render);
 }
 
+function applyTouchPadActions(playerIdx, pad, binding) {
+  if (pad.jump && !pad.prevJump) tryJump(playerIdx, binding.jump);
+  if (pad.attack && !pad.prevAttack) doMelee(playerIdx);
+  if (pad.orb && !pad.prevOrb && !visualState[playerIdx].charging) {
+    if (Date.now() >= roundLockUntil && !playerInEnemyFire(playerIdx)) {
+      const p = localState.players[playerIdx];
+      const ammo = p.orbAmmo != null ? p.orbAmmo : playerAmmoMax(p);
+      if (ammo > 0) {
+        p.chargeStartAt = Date.now();
+        visualState[playerIdx].charging = true;
+      }
+    }
+  }
+  if (!pad.orb && pad.prevOrb) {
+    const wasCharging = visualState[playerIdx].charging;
+    const heldMs = Date.now() - localState.players[playerIdx].chargeStartAt;
+    visualState[playerIdx].charging = false;
+    if (wasCharging && heldMs >= CHARGE_THRESHOLD_MS) fireProjectile(playerIdx);
+  }
+  if (pad.fire && !pad.prevFire) startFireBreathLocal(playerIdx);
+  if (!pad.fire && pad.prevFire) stopFireBreathLocal(playerIdx);
+}
+
 function applyTouchInput() {
   if (!touchState.enabled || remapState.active || localState.buffPickActive || !overlayEl.classList.contains("hidden")) {
-    touchState.prevLeft = touchState.left;
-    touchState.prevRight = touchState.right;
-    touchState.prevJump = touchState.jump;
-    touchState.prevAttack = touchState.attack;
-    touchState.prevOrb = touchState.orb;
-    touchState.prevFire = touchState.fire;
+    snapshotTouchPad(touchPads[0]);
+    snapshotTouchPad(touchPads[1]);
     return;
   }
-  const jumpNow = touchState.jump;
-  const jumpPrev = touchState.prevJump;
 
   if (mode !== "online") {
-    const b0 = keyBindings.p0;
-    if (jumpNow && !jumpPrev) {
-      tryJump(0, b0.jump);
-    }
-    if (touchState.attack && !touchState.prevAttack) {
-      doMelee(0);
-    }
-    if (touchState.orb && !touchState.prevOrb && !visualState[0].charging) {
-      if (Date.now() >= roundLockUntil && !playerInEnemyFire(0)) {
-        const p0 = localState.players[0];
-        const a0 = p0.orbAmmo != null ? p0.orbAmmo : playerAmmoMax(p0);
-        if (a0 > 0) {
-          p0.chargeStartAt = Date.now();
-          visualState[0].charging = true;
-        }
-      }
-    }
-    if (!touchState.orb && touchState.prevOrb) {
-      const wasCharging = visualState[0].charging;
-      const heldMs = Date.now() - localState.players[0].chargeStartAt;
-      visualState[0].charging = false;
-      if (wasCharging && heldMs >= CHARGE_THRESHOLD_MS) {
-        fireProjectile(0);
-      }
-    }
-    if (touchState.fire && !touchState.prevFire) startFireBreathLocal(0);
-    if (!touchState.fire && touchState.prevFire) stopFireBreathLocal(0);
+    applyTouchPadActions(0, touchPads[0], keyBindings.p0);
+    if (mode === "multi") applyTouchPadActions(1, touchPads[1], keyBindings.p1);
   } else if (socket && roomId) {
     const controls = onlineControlsFromInput();
     if (touchState.left !== touchState.prevLeft || touchState.right !== touchState.prevRight) {
@@ -3478,12 +3509,8 @@ function applyTouchInput() {
     }
   }
 
-  touchState.prevLeft = touchState.left;
-  touchState.prevRight = touchState.right;
-  touchState.prevJump = touchState.jump;
-  touchState.prevAttack = touchState.attack;
-  touchState.prevOrb = touchState.orb;
-  touchState.prevFire = touchState.fire;
+  snapshotTouchPad(touchPads[0]);
+  snapshotTouchPad(touchPads[1]);
 }
 
 /** Horizontal stepped sky (no smooth gradients) for pixel look. */
@@ -4094,18 +4121,8 @@ function fireProjectile(attackerIdx, override = null) {
 
 function resetInputState() {
   keys.clear();
-  touchState.left = false;
-  touchState.right = false;
-  touchState.jump = false;
-  touchState.attack = false;
-  touchState.orb = false;
-  touchState.fire = false;
-  touchState.prevLeft = false;
-  touchState.prevRight = false;
-  touchState.prevJump = false;
-  touchState.prevAttack = false;
-  touchState.prevOrb = false;
-  touchState.prevFire = false;
+  clearTouchPad(touchPads[0]);
+  clearTouchPad(touchPads[1]);
   visualState[0].charging = false;
   visualState[1].charging = false;
 }
@@ -4838,8 +4855,12 @@ function expireLocalBuffPick() {
 }
 
 function viewerMayChooseBuff() {
+  // Online: only the loser's client can pick; winner may watch.
   if (mode === "online") return playerIndex === localState.buffPickLoser;
+  // Single: human is always Blue — only when Blue lost.
   if (mode === "single") return localState.buffPickLoser === 0;
+  // Local multi shares one screen; either person can tap, but the power always
+  // applies to the loser (winner should not "claim" it as theirs).
   return true;
 }
 
@@ -5005,7 +5026,10 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
     syncBuff();
     if (!viewerMayChooseBuff()) {
       picker.choose.disabled = true;
+      picker.choose.setAttribute("aria-disabled", "true");
+      picker.choose.style.pointerEvents = "none";
       picker.choose.textContent = "Waiting for loser";
+      picker.root.classList.add("swipe-picker--spectator-only");
     }
     btnWrap.appendChild(picker.root);
   }
@@ -5013,7 +5037,11 @@ function showBuffPickOverlay(loserIdx, forcedTriplet = null) {
   const sub = document.getElementById("buffPickSub");
   const timerEl = document.getElementById("buffPickTimer");
   const name = loserIdx === 0 ? "Blue" : "Red";
-  if (title) title.textContent = `${name} lost — only ${name} gets a power`;
+  if (title) {
+    title.textContent = viewerMayChooseBuff()
+      ? `${name} lost — pick a comeback power`
+      : `${name} lost — winner watches, only ${name} picks`;
+  }
   localState.buffPickInputUnlocked = true;
   pendingBuffReplace = null;
   if (!(localState.buffPickDeadline > Date.now())) {
@@ -5070,8 +5098,8 @@ function updateLocalGame() {
   }
   const b0 = keyBindings.p0;
   const b1 = keyBindings.p1;
-  if (!keys.has(p0FireKey()) && !touchState.orb) visualState[0].charging = false;
-  if (!keys.has(p1FireKey())) visualState[1].charging = false;
+  if (!keys.has(p0FireKey()) && !touchPads[0].orb) visualState[0].charging = false;
+  if (!keys.has(p1FireKey()) && !(mode === "multi" && touchPads[1].orb)) visualState[1].charging = false;
 
   const p1 = localState.players[0];
   const p2 = localState.players[1];
@@ -5083,10 +5111,10 @@ function updateLocalGame() {
   const p2Rooted = (p2.freezeRootUntil || 0) > now;
   if (p1Rooted) p1.vx = 0;
   if (p2Rooted) p2.vx = 0;
-  const p1InputLeft = keys.has(b0.left) || touchState.left;
-  const p1InputRight = keys.has(b0.right) || touchState.right;
-  const p2InputLeft = mode === "multi" ? keys.has(b1.left) : false;
-  const p2InputRight = mode === "multi" ? keys.has(b1.right) : false;
+  const p1InputLeft = keys.has(b0.left) || touchPads[0].left;
+  const p1InputRight = keys.has(b0.right) || touchPads[0].right;
+  const p2InputLeft = mode === "multi" ? keys.has(b1.left) || touchPads[1].left : false;
+  const p2InputRight = mode === "multi" ? keys.has(b1.right) || touchPads[1].right : false;
   if (p1InputLeft !== p1InputRight) p1.facing = p1InputRight ? 1 : -1;
   if (p2InputLeft !== p2InputRight) p2.facing = p2InputRight ? 1 : -1;
   const p1Left = !p1Rooted && p1InputLeft;
@@ -5891,99 +5919,104 @@ function installMobileZoomGuards() {
 function setupUI() {
   installMobileZoomGuards();
   if (touchOverlayEl) {
-    const applyTouchAction = (action, pressed) => {
-      if (action === "left") touchState.left = pressed;
-      if (action === "right") touchState.right = pressed;
-      if (action === "jump") touchState.jump = pressed;
-      if (action === "attack") touchState.attack = pressed;
-      if (action === "orb") touchState.orb = pressed;
-      if (action === "fire") touchState.fire = pressed;
+    const applyTouchAction = (playerIdx, action, pressed) => {
+      const pad = touchPads[playerIdx] || touchPads[0];
+      if (action === "left") pad.left = pressed;
+      if (action === "right") pad.right = pressed;
+      if (action === "jump") pad.jump = pressed;
+      if (action === "attack") pad.attack = pressed;
+      if (action === "orb") pad.orb = pressed;
+      if (action === "fire") pad.fire = pressed;
     };
 
     touchOverlayEl.querySelectorAll("[data-touch-action]").forEach((btn) => {
       const action = btn.getAttribute("data-touch-action");
       if (!action) return;
+      const playerIdx = Number(btn.getAttribute("data-touch-player") || "0") || 0;
       btn.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         if (typeof btn.setPointerCapture === "function") btn.setPointerCapture(e.pointerId);
-        applyTouchAction(action, true);
+        applyTouchAction(playerIdx, action, true);
       });
       btn.addEventListener("pointerup", (e) => {
         e.preventDefault();
-        applyTouchAction(action, false);
+        applyTouchAction(playerIdx, action, false);
       });
-      btn.addEventListener("pointercancel", () => applyTouchAction(action, false));
+      btn.addEventListener("pointercancel", () => applyTouchAction(playerIdx, action, false));
     });
 
-    if (touchJoystickEl) {
+    const bindJoystick = (joyEl, stickEl, playerIdx) => {
+      if (!joyEl) return;
+      const pad = touchPads[playerIdx] || touchPads[0];
       const JOY_RADIUS = 52;
       const JOY_DEADZONE = 0.2;
       const JOY_MOVE_THRESHOLD = 0.32;
       let activeStickPointerId = null;
       const resetStick = () => {
         activeStickPointerId = null;
-        touchState.left = false;
-        touchState.right = false;
-        if (touchStickEl) touchStickEl.style.transform = "translate(-50%, -50%)";
+        pad.left = false;
+        pad.right = false;
+        if (stickEl) stickEl.style.transform = "translate(-50%, -50%)";
       };
       const moveStick = (clientX, clientY) => {
-        const rect = touchJoystickEl.getBoundingClientRect();
+        const rect = joyEl.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
-        const dx = clientX - cx;
-        const dy = clientY - cy;
-        const dist = Math.hypot(dx, dy);
+        const rawDx = clientX - cx;
+        const rawDy = clientY - cy;
+        // Visual stick offset stays in screen space; movement axes remap under CSS rotate.
+        const dist = Math.hypot(rawDx, rawDy);
         const scale = dist > JOY_RADIUS ? JOY_RADIUS / dist : 1;
-        const clampedX = dx * scale;
-        const clampedY = dy * scale;
-        if (touchStickEl) {
-          touchStickEl.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
+        const clampedX = rawDx * scale;
+        const clampedY = rawDy * scale;
+        if (stickEl) {
+          stickEl.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
         }
-        const nx = clampedX / JOY_RADIUS;
-        const ny = clampedY / JOY_RADIUS;
+        const axes = stickAxesFromClientDelta(clampedX, clampedY);
+        const nx = axes.x / JOY_RADIUS;
+        const ny = axes.y / JOY_RADIUS;
         const mag = Math.hypot(nx, ny);
         if (mag < JOY_DEADZONE) {
-          touchState.left = false;
-          touchState.right = false;
+          pad.left = false;
+          pad.right = false;
           return;
         }
-        // Remap after deadzone so movement comes on smoothly.
         const scaled = Math.min(1, (mag - JOY_DEADZONE) / (1 - JOY_DEADZONE));
         const sx = (nx / mag) * scaled;
-        touchState.left = sx < -JOY_MOVE_THRESHOLD;
-        touchState.right = sx > JOY_MOVE_THRESHOLD;
+        pad.left = sx < -JOY_MOVE_THRESHOLD;
+        pad.right = sx > JOY_MOVE_THRESHOLD;
       };
-      touchJoystickEl.addEventListener("pointerdown", (e) => {
+      joyEl.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         activeStickPointerId = e.pointerId;
-        if (typeof touchJoystickEl.setPointerCapture === "function") {
-          touchJoystickEl.setPointerCapture(e.pointerId);
-        }
+        if (typeof joyEl.setPointerCapture === "function") joyEl.setPointerCapture(e.pointerId);
         moveStick(e.clientX, e.clientY);
       });
-      touchJoystickEl.addEventListener("pointermove", (e) => {
+      joyEl.addEventListener("pointermove", (e) => {
         if (activeStickPointerId !== e.pointerId) return;
         e.preventDefault();
         moveStick(e.clientX, e.clientY);
       });
-      touchJoystickEl.addEventListener("pointerup", (e) => {
+      const endStick = (e) => {
         if (activeStickPointerId !== e.pointerId) return;
-        if (typeof touchJoystickEl.releasePointerCapture === "function") {
+        if (typeof joyEl.releasePointerCapture === "function") {
           try {
-            touchJoystickEl.releasePointerCapture(e.pointerId);
+            joyEl.releasePointerCapture(e.pointerId);
           } catch {}
         }
         resetStick();
-      });
-      touchJoystickEl.addEventListener("pointercancel", (e) => {
-        if (activeStickPointerId !== e.pointerId) return;
-        resetStick();
-      });
-      touchJoystickEl.addEventListener("pointerleave", (e) => {
-        if (activeStickPointerId !== e.pointerId) return;
-        resetStick();
-      });
-    }
+      };
+      joyEl.addEventListener("pointerup", endStick);
+      joyEl.addEventListener("pointercancel", endStick);
+      joyEl.addEventListener("pointerleave", endStick);
+    };
+
+    bindJoystick(touchJoystickEl, touchStickEl, 0);
+    bindJoystick(
+      document.getElementById("touchJoystickP1"),
+      document.getElementById("touchStickP1"),
+      1
+    );
   }
 
   document.getElementById("singleBtn").addEventListener("click", () => {
@@ -6230,6 +6263,8 @@ function setupUI() {
       }
       const btn = e.target.closest("[data-buff]");
       if (!btn) return;
+      if (!viewerMayChooseBuff()) return;
+      if (btn.disabled || btn.getAttribute("aria-disabled") === "true") return;
       applyBuffChoice(btn.getAttribute("data-buff"));
     });
   }

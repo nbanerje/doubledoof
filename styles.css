@@ -1417,18 +1417,24 @@ button.lobby-decline {
   }
 
   .touch-left,
-  .touch-right {
+  .touch-right,
+  .touch-p0-move,
+  .touch-p0-actions,
+  .touch-p1-move,
+  .touch-p1-actions {
     grid-row: 1;
     align-self: end;
     margin: 0;
   }
 
-  .touch-left {
+  .touch-left,
+  .touch-p0-move {
     grid-column: 1;
     justify-self: start;
   }
 
-  .touch-right {
+  .touch-right,
+  .touch-p0-actions {
     grid-column: 3;
     justify-self: end;
     display: flex;
@@ -1437,17 +1443,97 @@ button.lobby-decline {
     gap: 8px;
   }
 
+  .touch-p2-only {
+    display: none !important;
+  }
+
+  .game-wrap:has(.touch-overlay--multi) {
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  }
+
+  .game-wrap:has(.touch-overlay--multi) .touch-p2-only {
+    display: flex !important;
+  }
+
+  .game-wrap:has(.touch-overlay--multi) .play-stage {
+    grid-column: 3;
+  }
+
+  .game-wrap:has(.touch-overlay--multi) .touch-p0-move {
+    grid-column: 1;
+  }
+
+  .game-wrap:has(.touch-overlay--multi) .touch-p0-actions {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .game-wrap:has(.touch-overlay--multi) .touch-p1-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    grid-column: 4;
+    justify-self: end;
+  }
+
+  .game-wrap:has(.touch-overlay--multi) .touch-p1-move {
+    display: flex;
+    grid-column: 5;
+    justify-self: end;
+  }
+
+  .game-wrap:has(.touch-overlay--multi) .touch-p0-actions .touch-btn,
+  .game-wrap:has(.touch-overlay--multi) .touch-p1-actions .touch-btn {
+    width: min(96px, 24dvh);
+    min-width: 72px;
+    min-height: 52px;
+    font-size: 0.72rem;
+    padding: 8px 10px;
+  }
+
+  .game-wrap:has(.touch-overlay--multi) .touch-joystick {
+    width: min(112px, 34dvh);
+    height: min(112px, 34dvh);
+  }
+
+  .touch-pad-label {
+    display: block;
+    text-align: center;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #ff9aa3;
+    margin-bottom: 2px;
+  }
+
+  .touch-joystick--p1 {
+    border-color: rgba(255, 150, 160, 0.92);
+  }
+
+  .touch-stick--p1 {
+    background: rgba(255, 140, 150, 0.95);
+  }
+
   .touch-joystick {
     width: min(136px, 42dvh);
     height: min(136px, 42dvh);
   }
 
   .touch-right .touch-btn,
-  .touch-right .touch-btn--attack {
+  .touch-right .touch-btn--attack,
+  .touch-p0-actions .touch-btn,
+  .touch-p0-actions .touch-btn--attack {
     width: min(124px, 32dvh);
     min-width: 108px;
     min-height: 72px;
   }
+}
+
+.swipe-picker--spectator-only .swipe-picker-choose {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 @media (pointer: coarse) and (orientation: portrait) {
@@ -1639,12 +1725,15 @@ html.safari-isl-active:not(.safari-is-locked) body {
 
 /* Keep menus / swipe pickers / controls tappable while chrome-hide scroll is armed. */
 .app.safari-game-fixed .arcade-overlay,
+.app.safari-game-fixed .arcade-extra,
 .app.safari-game-fixed .buff-pick-overlay,
 .app.safari-game-fixed .settings-toggle,
 .app.safari-game-fixed .settings-drawer,
 .app.safari-game-fixed .settings-backdrop,
 .app.safari-game-fixed .touch-overlay,
-.app.safari-game-fixed .round-banner {
+.app.safari-game-fixed .round-banner,
+.app.safari-game-fixed input,
+.app.safari-game-fixed button {
   pointer-events: auto !important;
 }
 
