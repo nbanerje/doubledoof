@@ -148,6 +148,18 @@
     });
   }
 
+  function scrollChromeAway() {
+    // User-gesture scroll so Safari will collapse its bars (programmatic alone is ignored).
+    const y = Math.max(120, Math.floor(window.innerHeight * 0.35));
+    try {
+      window.scrollTo({ top: y, left: 0, behavior: "smooth" });
+    } catch (_) {
+      window.scrollTo(0, y);
+    }
+    window.setTimeout(measure, 120);
+    window.setTimeout(measure, 400);
+  }
+
   function init() {
     if (!isIosPhone()) return;
     measure();
@@ -170,6 +182,19 @@
         tabsOpen = null;
         measure();
       });
+    }
+    const tip = overlay();
+    if (tip) {
+      tip.style.pointerEvents = "auto";
+      tip.addEventListener(
+        "pointerdown",
+        (ev) => {
+          if (tip.hidden) return;
+          ev.preventDefault();
+          scrollChromeAway();
+        },
+        { passive: false }
+      );
     }
   }
 

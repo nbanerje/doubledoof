@@ -493,12 +493,10 @@ button:hover {
 .char-carousel {
   display: flex;
   width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  /* Paging is driven in JS (velocity flick + ease-out), not CSS scroll-snap. */
+  /* JS drives paging via scrollLeft; hide overflow so iOS won't steal the gesture. */
+  overflow: hidden;
   scroll-snap-type: none;
   scroll-behavior: auto;
-  -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   touch-action: none;
   scrollbar-width: none;
@@ -1589,6 +1587,7 @@ html.safari-is-locked .safari-isl-holder {
   align-items: flex-start;
   justify-content: center;
   padding: 12px env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  /* Hint is tappable (scrolls chrome away); empty inset areas stay pass-through. */
   pointer-events: none;
 }
 
@@ -1623,7 +1622,7 @@ html.safari-isl-active:not(.safari-is-locked) body {
   touch-action: pan-y;
 }
 
-/* Game stays visually fixed; pointer-events none so the swipe scrolls the document. */
+/* Game stays visually fixed; pointer-events none so empty areas scroll the document. */
 .app.safari-game-fixed {
   position: fixed !important;
   inset: 0 !important;
@@ -1636,6 +1635,17 @@ html.safari-isl-active:not(.safari-is-locked) body {
   overflow: hidden !important;
   z-index: 1;
   pointer-events: none !important;
+}
+
+/* Keep menus / swipe pickers / controls tappable while chrome-hide scroll is armed. */
+.app.safari-game-fixed .arcade-overlay,
+.app.safari-game-fixed .buff-pick-overlay,
+.app.safari-game-fixed .settings-toggle,
+.app.safari-game-fixed .settings-drawer,
+.app.safari-game-fixed .settings-backdrop,
+.app.safari-game-fixed .touch-overlay,
+.app.safari-game-fixed .round-banner {
+  pointer-events: auto !important;
 }
 
 /* After chrome collapses: ISL lock keeps bars from returning. */
