@@ -210,10 +210,9 @@ function drawHudOnView() {
   vc.imageSmoothingEnabled = true;
   const p0 = localState.players[0];
   const p1 = localState.players[1];
-  drawHealthBarHud(vc, 18, 12, p0.health, p0.color, `Blue · ${p0.score} wins`, playerMaxHp(p0));
-  drawOrbAmmoBarHud(vc, 18, 52, p0, p0.color, "Blue");
-  drawHealthBarHud(vc, VIEW_W - 278, 12, p1.health, p1.color, `Red · ${p1.score} wins`, playerMaxHp(p1));
-  drawOrbAmmoBarHud(vc, VIEW_W - 278, 52, p1, p1.color, "Red");
+  // HP lives on the fighters (vertical bars above heads). Top HUD keeps orbs + match info only.
+  drawOrbAmmoBarHud(vc, 18, 12, p0, p0.color, "Blue");
+  drawOrbAmmoBarHud(vc, VIEW_W - 278, 12, p1, p1.color, "Red");
   const lvl = currentLevel();
   vc.textAlign = "center";
   vc.textBaseline = "alphabetic";
@@ -2865,24 +2864,37 @@ function drawFighterTopColorBand(p, baseY, idx) {
   ctx.restore();
 }
 
+/**
+ * Horizontal HP bar just above the drawn sprite head (not the short hitbox top).
+ * Top-of-screen HP HUD was removed so health "goes down" onto the fighters.
+ * Sprite feet sit at baseY + PLAYER_BODY_H; art is ~PLAYER_DRAW_H tall.
+ */
 function drawFighterHealthBar(p, baseY, idx) {
   if (idx !== 0 && idx !== 1) return;
   const maxHp = Math.max(1, playerMaxHp(p));
   const ratio = clamp((p.health ?? maxHp) / maxHp, 0, 1);
-  const bw = 48;
-  const bh = 6;
+  const bw = 46;
+  const bh = 8;
+  const gapAboveHead = 10;
+  const spriteTop = baseY + PLAYER_BODY_H - PLAYER_DRAW_H;
   const x = Math.round(p.x + PLAYER_BODY_W / 2 - bw / 2);
-  const y = Math.round(Math.max(6, baseY - 13));
+  const y = Math.round(Math.max(4, spriteTop - gapAboveHead - bh));
+  const fillW = Math.max(0, Math.round(bw * ratio));
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = "rgba(4, 8, 18, 0.88)";
-  ctx.fillRect(x - 1, y - 1, bw + 2, bh + 2);
-  ctx.fillStyle = "#1f2937";
+  ctx.fillStyle = "rgba(4, 8, 18, 0.92)";
+  ctx.fillRect(x - 2, y - 2, bw + 4, bh + 4);
+  ctx.fillStyle = "#1a2233";
   ctx.fillRect(x, y, bw, bh);
   ctx.fillStyle = idx === 0 ? "#46aaff" : "#ff6e78";
-  ctx.fillRect(x, y, Math.round(bw * ratio), bh);
-  ctx.fillStyle = "rgba(255,255,255,0.35)";
-  ctx.fillRect(x, y, Math.round(bw * ratio), 1);
+  ctx.fillRect(x, y, fillW, bh);
+  if (fillW > 1) {
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.fillRect(x, y, fillW, 2);
+  }
+  ctx.strokeStyle = "rgba(220, 230, 255, 0.65)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - 0.5, y - 0.5, bw + 1, bh + 1);
   ctx.restore();
 }
 
