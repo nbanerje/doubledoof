@@ -1522,7 +1522,7 @@ function appendLoadoutPreview(preview, opt, isCharacter, index) {
 /** Portrait phones CSS-rotate `.app` 90deg; map screen deltas into carousel scroll. */
 function isCssRotatedPhoneLayout() {
   if (!isTouchDevice) return false;
-  if (document.documentElement.classList.contains("safari-scroll-hack")) return false;
+  if (document.documentElement.classList.contains("safari-isl-active")) return false;
   return window.matchMedia("(orientation: portrait)").matches && window.matchMedia("(pointer: coarse)").matches;
 }
 
@@ -2322,187 +2322,7 @@ function isLandscapeViewport() {
   return window.innerWidth > window.innerHeight;
 }
 
-/**
- * iOS Safari landscape chrome.
- * Apple does not allow a page to hide the tab/URL bar by itself — only a user
- * scroll (or Add to Home Screen) can. We automate the best allowed path:
- *   1) on the first tap, run a scroll burst under that user gesture
- *   2) always fit the game to visualViewport so leftover tabs don't cover UI
- *   3) never leave a stuck "swipe" hint on screen
- */
-let safariMode = "off"; // off | active
-let safariMeasureRaf = 0;
-let safariAutoHideDone = false;
-let safariHintTimer = 0;
-
-function safariLandscapeNudgeNeeded() {
-  if (isBundledApp() || isStandaloneDisplay()) return false;
-  if (document.fullscreenElement || document.webkitFullscreenElement) return false;
-  if (!isIosBrowser()) return false;
-  const coarse = window.matchMedia("(pointer: coarse)").matches || isTouchDevice;
-  return coarse && isLandscapeViewport();
-}
-
-function safariTabsAreOpen() {
-  const vv = window.visualViewport;
-  if (!vv) return false;
-  const screenShort = Math.min(window.screen?.width || 0, window.screen?.height || 0);
-  if (!screenShort) return false;
-  return vv.height + (vv.offsetTop || 0) < screenShort - 20;
-}
-
-function hideSafariHint() {
-  const hint = document.getElementById("safariChromeHint");
-  if (hint) hint.hidden = true;
-  if (safariHintTimer) {
-    window.clearTimeout(safariHintTimer);
-    safariHintTimer = 0;
-  }
-}
-
-function showSafariHint(message, ms = 2200) {
-  const hint = document.getElementById("safariChromeHint");
-  if (!hint) return;
-  const label = hint.querySelector("p");
-  if (label && message) label.textContent = message;
-  hint.hidden = false;
-  if (safariHintTimer) window.clearTimeout(safariHintTimer);
-  safariHintTimer = window.setTimeout(() => {
-    safariHintTimer = 0;
-    hideSafariHint();
-  }, ms);
-}
-
-function clearSafariInlineLayout() {
-  const app = document.querySelector(".app");
-  document.body.style.height = "";
-  document.body.style.minHeight = "";
-  const nudge = document.getElementById("safariNudge");
-  if (nudge) nudge.style.height = "";
-  if (app) {
-    app.style.top = "";
-    app.style.left = "";
-    app.style.right = "";
-    app.style.bottom = "";
-    app.style.width = "";
-    app.style.height = "";
-  }
-  document.documentElement.style.removeProperty("--safari-vvh");
-}
-
-/** Keep the game inside the visible viewport even when Safari tabs stay up. */
-function fitAppToVisualViewport() {
-  const app = document.querySelector(".app");
-  if (!app) return;
-  if (!safariLandscapeNudgeNeeded()) {
-    if (safariMode !== "off") {
-      document.documentElement.classList.remove("safari-scroll-hack", "safari-chrome-open", "safari-chrome-locked", "safari-vv-fit");
-      hideSafariHint();
-      clearSafariInlineLayout();
-      safariMode = "off";
-    }
-    return;
-  }
-  const root = document.documentElement;
-  const vv = window.visualViewport;
-  const top = vv ? vv.offsetTop : 0;
-  const left = vv ? vv.offsetLeft : 0;
-  const width = vv ? vv.width : window.innerWidth;
-  const height = vv ? vv.height : window.innerHeight;
-  root.classList.add("safari-scroll-hack", "safari-vv-fit");
-  root.classList.remove("safari-chrome-open");
-  root.classList.add("safari-chrome-locked");
-  root.style.setProperty("--safari-vvh", `${height}px`);
-  app.style.top = `${top}px`;
-  app.style.left = `${left}px`;
-  app.style.right = "auto";
-  app.style.bottom = "auto";
-  app.style.width = `${width}px`;
-  app.style.height = `${height}px`;
-  safariMode = "active";
-}
-
-/**
- * Best-effort auto hide. Must run from a user gesture. Safari may still keep the
- * tabs; we always fall back to visualViewport fit and dismiss the hint.
- */
-function autoHideSafariChromeFromGesture() {
-  if (!safariLandscapeNudgeNeeded() || safariAutoHideDone) {
-    fitAppToVisualViewport();
-    hideSafariHint();
-    return;
-  }
-  safariAutoHideDone = true;
-  const root = document.documentElement;
-  const nudge = document.getElementById("safariNudge");
-  const vvH = Math.round(window.visualViewport?.height || window.innerHeight);
-  const pad = Math.max(vvH * 2, 1200);
-  showSafariHint("Filling the screen…", 1800);
-  root.classList.add("safari-scroll-hack", "safari-chrome-open");
-  root.classList.remove("safari-chrome-locked", "safari-vv-fit");
-  if (nudge) nudge.style.height = `${pad}px`;
-  document.body.style.minHeight = `${vvH + pad}px`;
-
-  // Scroll burst under the tap gesture — the strongest automation Safari allows.
-  const distances = [1, Math.floor(pad * 0.2), Math.floor(pad * 0.45), Math.floor(pad * 0.7), pad];
-  let i = 0;
-  const tick = () => {
-    if (i < distances.length) {
-      const y = distances[i++];
-      window.scrollTo(0, y);
-      document.documentElement.scrollTop = y;
-      document.body.scrollTop = y;
-      window.setTimeout(tick, 32);
-      return;
-    }
-    window.setTimeout(() => {
-      if (nudge) nudge.style.height = "0px";
-      document.body.style.minHeight = "";
-      // Whether or not Safari collapsed the bars, pin to the visible viewport and drop the hint.
-      fitAppToVisualViewport();
-      hideSafariHint();
-      if (safariTabsAreOpen()) {
-        showSafariHint("Safari keeps its tabs here — game fits the free space", 3200);
-      }
-    }, 180);
-  };
-  tick();
-}
-
-function scheduleSafariLandscapeNudge() {
-  if (safariMeasureRaf) cancelAnimationFrame(safariMeasureRaf);
-  safariMeasureRaf = requestAnimationFrame(() => {
-    safariMeasureRaf = 0;
-    fitAppToVisualViewport();
-  });
-}
-
-window.addEventListener("resize", scheduleSafariLandscapeNudge, { passive: true });
-window.addEventListener(
-  "orientationchange",
-  () => {
-    safariAutoHideDone = false;
-    scheduleSafariLandscapeNudge();
-  },
-  { passive: true }
-);
-window.addEventListener("pageshow", scheduleSafariLandscapeNudge, { passive: true });
-document.addEventListener("fullscreenchange", scheduleSafariLandscapeNudge);
-document.addEventListener("webkitfullscreenchange", scheduleSafariLandscapeNudge);
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) scheduleSafariLandscapeNudge();
-});
-if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", scheduleSafariLandscapeNudge, { passive: true });
-  window.visualViewport.addEventListener("scroll", scheduleSafariLandscapeNudge, { passive: true });
-}
-if (window.screen?.orientation?.addEventListener) {
-  window.screen.orientation.addEventListener("change", () => {
-    safariAutoHideDone = false;
-    scheduleSafariLandscapeNudge();
-  });
-}
-
+/** Safari landscape chrome is handled by safariFullscreen.js (Playgama / ISL port). */
 function enterImmersivePlay() {
   if (!isTouchDevice || isStandaloneDisplay()) return;
   const el = document.documentElement;
@@ -2513,28 +2333,17 @@ function enterImmersivePlay() {
       if (pending && typeof pending.catch === "function") pending.catch(() => {});
     }
   } catch {
-    /* Older browsers reject the options object. */
+    /* ignore */
   }
   if (typeof el.webkitRequestFullscreen === "function") {
     try {
       el.webkitRequestFullscreen();
     } catch {
-      /* iOS Safari has no real web fullscreen API. */
+      /* iOS Safari has no reliable Fullscreen API for pages. */
     }
   }
-  autoHideSafariChromeFromGesture();
 }
-document.addEventListener(
-  "pointerdown",
-  () => {
-    enterImmersivePlay();
-  },
-  { passive: true, once: false }
-);
-// First paint: fit immediately; chrome auto-hide waits for a tap (required by Safari).
-fitAppToVisualViewport();
-setTimeout(fitAppToVisualViewport, 250);
-setTimeout(fitAppToVisualViewport, 800);
+document.addEventListener("pointerdown", () => enterImmersivePlay(), { passive: true });
 
 const touchState = {
   enabled: isTouchDevice,
@@ -2739,7 +2548,7 @@ function setArcadeStep(step) {
   arcadeActionsEl.innerHTML = "";
   if (step === "welcome" && isIosBrowser() && !isStandaloneDisplay() && arcadeExtraEl) {
     arcadeExtraEl.innerHTML =
-      '<p class="bind-muted">The game stays landscape, even if the phone is upright. It fits the visible screen automatically; Safari may keep its own tabs. Add to Home Screen for a true full-screen icon. The joystick and buttons sit beside the fight once the match starts.</p>';
+      '<p class="bind-muted">The game stays landscape, even if the phone is upright. On iPhone Safari in landscape, scroll once when prompted so the browser bars tuck away. Add to Home Screen for a true full-screen icon. The joystick and buttons sit beside the fight once the match starts.</p>';
   }
   const useSwipeActions = isTouchDevice && view.actions.length > 1;
   if (useSwipeActions) {
@@ -5866,7 +5675,7 @@ function installMobileZoomGuards() {
     "touchmove",
     (e) => {
       // During the brief tap-triggered auto-hide scroll, allow document pan.
-      if (document.documentElement.classList.contains("safari-chrome-open")) return;
+      if (document.documentElement.classList.contains("safari-isl-active") && !document.documentElement.classList.contains("safari-is-locked")) return;
       const target = e.target instanceof Element ? e.target : null;
       if (!target) return;
       const inGameSurface = !!target.closest("#gameCanvas, .touch-overlay, .game-wrap");

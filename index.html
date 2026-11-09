@@ -19,9 +19,17 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=24" />
+    <link rel="stylesheet" href="./styles.css?v=25" />
   </head>
   <body>
+    <!-- Playgama / ISL Safari landscape fullscreen shell -->
+    <div id="safariIslHolder" class="safari-isl-holder" aria-hidden="true">
+      <div class="safari-isl-scroller">
+        <div class="safari-isl-scroller-inner">
+          <div id="safariIslContent" class="safari-isl-content"></div>
+        </div>
+      </div>
+    </div>
     <main class="app">
       <section class="game-wrap">
         <div class="play-stage">
@@ -112,11 +120,12 @@
     </main>
     <div id="safariNudge" class="safari-nudge" aria-hidden="true"></div>
     <div id="safariChromeHint" class="safari-chrome-hint" hidden>
-      <p>Filling the screen…</p>
+      <p>Scroll down a bit to hide the browser bars</p>
     </div>
     <script src="/socket.io/socket.io.js"></script>
     <script src="./addonCatalog.js?v=1"></script>
     <script src="./fighters.js?v=3"></script>
-    <script src="./game.js?v=37"></script>
+    <script src="./safariFullscreen.js?v=1"></script>
+    <script src="./game.js?v=38"></script>
   </body>
   </html>

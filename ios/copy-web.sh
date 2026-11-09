@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/web"
 rm -rf "$DEST"
 mkdir -p "$DEST/assets"
-cp "$ROOT/index.html" "$ROOT/styles.css" "$ROOT/game.js" "$ROOT/addonCatalog.js" "$ROOT/fighters.js" "$ROOT/favicon.ico" "$ROOT/apple-touch-icon.png" "$DEST/"
+cp "$ROOT/index.html" "$ROOT/styles.css" "$ROOT/game.js" "$ROOT/safariFullscreen.js" "$ROOT/addonCatalog.js" "$ROOT/fighters.js" "$ROOT/favicon.ico" "$ROOT/apple-touch-icon.png" "$DEST/"
 cp -R "$ROOT/assets/." "$DEST/assets/"
 cp "$ROOT/node_modules/socket.io/client-dist/socket.io.min.js" "$DEST/socket.io.min.js"
 python3 - "$DEST/index.html" <<'PY'

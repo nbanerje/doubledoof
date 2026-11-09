@@ -1507,31 +1507,85 @@ button.lobby-decline {
   }
 }
 
+/* ——— Playgama / ISL Safari landscape fullscreen ———
+   https://github.com/Playgama/hide-mobile-safari-tabs
+   https://stripearmy.medium.com/i-fixed-a-decade-long-ios-safari-problem-0d85f76caec0
+*/
+:root {
+  --isl-vh: 1%;
+}
+
+.safari-isl-holder {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: min(calc(var(--isl-vh) * 100), 100%);
+  overflow: hidden;
+  z-index: 2147483646;
+  display: none;
+}
+
+html.safari-is-locked .safari-isl-holder {
+  display: block;
+}
+
+.safari-isl-scroller {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.safari-isl-scroller-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  height: calc(100% + 1px);
+  min-height: calc(100% + 1px);
+}
+
+.safari-isl-content {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  position: sticky;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  height: calc(100% - 1px);
+}
+
 .safari-nudge {
   display: none;
-  width: 100%;
+  width: 1px;
   height: 0;
-  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
   pointer-events: none;
+  background: transparent;
+}
+
+.safari-nudge.is-visible {
+  display: block;
+  height: 2000vh;
 }
 
 .safari-chrome-hint {
   position: fixed;
-  left: 50%;
-  bottom: max(12px, env(safe-area-inset-bottom, 0px));
-  z-index: 100000;
-  transform: translateX(-50%);
-  max-width: min(92vw, 420px);
-  margin: 0;
-  padding: 10px 16px;
-  border-radius: 999px;
-  background: rgba(8, 12, 24, 0.82);
-  color: #f4f7ff;
-  font: 600 0.92rem/1.25 "DM Sans", "Segoe UI", sans-serif;
-  letter-spacing: 0.01em;
-  text-align: center;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12px env(safe-area-inset-right) 0 env(safe-area-inset-left);
   pointer-events: none;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
 }
 
 .safari-chrome-hint[hidden] {
@@ -1540,55 +1594,65 @@ button.lobby-decline {
 
 .safari-chrome-hint p {
   margin: 0;
+  max-width: 80vw;
+  padding: 12px 16px;
+  border-radius: 96px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font: 600 0.95rem/1.3 "DM Sans", "Segoe UI", sans-serif;
+  text-align: center;
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
 }
 
-/* Brief auto-scroll runway used only during the tap-triggered hide attempt. */
-html.safari-scroll-hack.safari-chrome-open {
+/* While waiting for a user scroll: document must scroll (override root overflow:hidden). */
+html.safari-isl-active:not(.safari-is-locked),
+html.safari-isl-active:not(.safari-is-locked) body {
   position: static !important;
   width: 100% !important;
   height: auto !important;
+  min-height: 100% !important;
   overflow-x: hidden !important;
   overflow-y: scroll !important;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: none;
+  touch-action: pan-y;
 }
 
-html.safari-scroll-hack.safari-chrome-open .safari-nudge {
-  display: block;
-  width: 1px;
-  margin-left: -1px;
-  pointer-events: none;
-}
-
-/* Always-on fit: game fills the visible viewport (above Safari tabs if they stay). */
-html.safari-vv-fit,
-html.safari-scroll-hack.safari-chrome-locked {
+/* Game stays visually fixed; pointer-events none so the swipe scrolls the document. */
+.app.safari-game-fixed {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  transform: none !important;
   overflow: hidden !important;
+  z-index: 1;
+  pointer-events: none !important;
+}
+
+/* After chrome collapses: ISL lock keeps bars from returning. */
+html.safari-is-locked,
+html.safari-is-locked body {
+  overflow: hidden !important;
+  position: relative !important;
+  height: 100dvh !important;
   overscroll-behavior: none;
   touch-action: manipulation;
 }
 
-html.safari-vv-fit body,
-html.safari-scroll-hack.safari-chrome-locked body {
-  overflow: hidden !important;
-  overscroll-behavior: none;
+.app.safari-game-locked {
   position: relative !important;
+  inset: auto !important;
   width: 100% !important;
   height: 100% !important;
-  height: 100dvh !important;
-}
-
-html.safari-vv-fit .safari-nudge,
-html.safari-scroll-hack.safari-chrome-locked .safari-nudge {
-  display: none !important;
-  height: 0 !important;
-}
-
-html.safari-vv-fit .app,
-html.safari-scroll-hack.safari-chrome-locked .app {
-  position: fixed !important;
+  min-height: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
   transform: none !important;
-  overflow: hidden;
-  min-height: 0 !important;
+  overflow: hidden !important;
+  pointer-events: auto !important;
 }
