@@ -274,8 +274,8 @@
     const lean = pose.attackPose ? 4 : 0;
     const bodyW = 26;
     const bodyH = 34;
-    const dw = 38;
-    const dh = 44;
+    const dw = 58;
+    const dh = 72;
     const footX = p.x + bodyW / 2 + pose.freezeVibeX - (pose.recoil ? 4 * fac : 0) + fac * lean;
     const footY = pose.baseY + bodyH + pose.freezeVibeY + bob;
     ctx.save();

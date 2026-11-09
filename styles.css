@@ -496,11 +496,19 @@ button:hover {
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
-  touch-action: pan-x pan-y;
+  touch-action: none;
   scrollbar-width: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.char-carousel.is-dragging {
+  cursor: grabbing;
+  scroll-snap-type: none;
 }
 
 .char-carousel::-webkit-scrollbar {
@@ -588,6 +596,20 @@ button.char-slide:disabled,
 .swipe-picker-slide {
   box-sizing: border-box;
   pointer-events: none;
+}
+
+.swipe-picker-nav {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.swipe-picker-arrow {
+  flex: 1 1 auto;
+  min-height: 44px;
+  font-size: 1.6rem;
+  line-height: 1;
+  font-weight: 700;
 }
 
 .swipe-picker-slide-body {
@@ -744,14 +766,18 @@ button.char-tile:not(:disabled):hover {
 
 .char-tile-preview--character,
 .char-tile-preview--weapon {
-  width: 84px;
-  height: 64px;
+  width: 108px;
+  height: 120px;
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
   font-family: "Press Start 2P", monospace;
   font-size: 1rem;
   color: #f7d36b;
   overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 78%, rgba(90, 120, 200, 0.28), transparent 62%),
+    #0d1220;
 }
 
 .char-tile-canvas {
@@ -851,7 +877,7 @@ button.char-tile:not(:disabled):hover {
 .arcade-actions .char-slide.swipe-picker-slide {
   min-width: 100%;
   flex: 0 0 100%;
-  touch-action: pan-x;
+  touch-action: none;
 }
 
 .hidden {
@@ -1183,9 +1209,16 @@ button.lobby-decline {
   }
 
   .char-carousel,
-  .swipe-picker-track,
+  .swipe-picker-track {
+    touch-action: none;
+  }
+
   .swipe-picker-slide {
-    touch-action: pan-x;
+    touch-action: none;
+  }
+
+  .swipe-picker-nav {
+    display: flex;
   }
 
   .char-carousel-nav {
@@ -1221,8 +1254,8 @@ button.lobby-decline {
 
   .char-tile-preview--character,
   .char-tile-preview--weapon {
-    width: 48px;
-    height: 40px;
+    width: 72px;
+    height: 84px;
     flex: 0 0 auto;
   }
 

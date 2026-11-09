@@ -251,8 +251,14 @@ const PLATFORM_RAISE_PX = 40;
 /** Axis-aligned body: `p.x` left, `p.y` top; feet sit on `plat.y` / `FLOOR_Y`. */
 const PLAYER_BODY_W = 26;
 const PLAYER_BODY_H = 34;
+/**
+ * Draw sprites larger than the hitbox so fighters read as characters, not colored bars.
+ * Collision stays on PLAYER_BODY_*; feet still pin to the hitbox bottom.
+ */
+const PLAYER_DRAW_W = 58;
+const PLAYER_DRAW_H = 72;
 /** Keeps the wider fighter graphic inside the canvas when walking to either edge. */
-const PLAYER_SCREEN_PAD = 18;
+const PLAYER_SCREEN_PAD = 28;
 function clampPlayerX(x) {
   return clamp(x, PLAYER_SCREEN_PAD, VIEW_W - PLAYER_BODY_W - PLAYER_SCREEN_PAD);
 }
@@ -1439,15 +1445,57 @@ function characterPowerText(opt) {
   return `${pack?.blurb || ""} ${kit}`.trim();
 }
 
+function coreCharacterBlit(characterId) {
+  if (characterId === "dragon") return dragonIdleBlit;
+  if (characterId === "funus") return funusIdleBlit;
+  if (characterId === "knight") return percivalIdleBlit;
+  return null;
+}
+
+function paintCoreCharacterPreview(canvas, characterId) {
+  const g = canvas.getContext("2d");
+  if (!g) return false;
+  g.imageSmoothingEnabled = false;
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  const bl = coreCharacterBlit(characterId);
+  if (!bl) return false;
+  const pad = 4;
+  const s = Math.min((canvas.width - pad * 2) / bl.cw, (canvas.height - pad * 2) / bl.ch);
+  const dw = bl.cw * s;
+  const dh = bl.ch * s;
+  g.drawImage(
+    bl.canvas,
+    bl.cx,
+    bl.cy,
+    bl.cw,
+    bl.ch,
+    (canvas.width - dw) / 2,
+    canvas.height - dh - 2,
+    dw,
+    dh
+  );
+  return true;
+}
+
 function appendLoadoutPreview(preview, opt, isCharacter, index) {
-  if (opt.body && window.Fighters) {
+  if (isCharacter && opt.body && window.Fighters) {
     const canvas = document.createElement("canvas");
-    canvas.width = 72;
-    canvas.height = 84;
+    canvas.width = 96;
+    canvas.height = 112;
     canvas.className = "char-tile-canvas";
     Fighters.paintFighterPreview(canvas, opt.body, opt.color);
     preview.appendChild(canvas);
     return;
+  }
+  if (isCharacter) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 96;
+    canvas.height = 112;
+    canvas.className = "char-tile-canvas";
+    if (paintCoreCharacterPreview(canvas, opt.id)) {
+      preview.appendChild(canvas);
+      return;
+    }
   }
   if (!isCharacter && opt.id !== "sword" && opt.id !== "staff" && window.Fighters) {
     const canvas = document.createElement("canvas");
@@ -1471,8 +1519,19 @@ function appendLoadoutPreview(preview, opt, isCharacter, index) {
     : String(index + 1);
 }
 
+/** Portrait phones CSS-rotate `.app` 90deg; map screen deltas into carousel scroll. */
+function isCssRotatedPhoneLayout() {
+  if (!isTouchDevice) return false;
+  if (document.documentElement.classList.contains("safari-scroll-hack")) return false;
+  return window.matchMedia("(orientation: portrait)").matches && window.matchMedia("(pointer: coarse)").matches;
+}
+
+function swipeAxisDelta(dx, dy) {
+  return isCssRotatedPhoneLayout() ? dy : dx;
+}
+
 /**
- * Horizontal snap carousel. Browse by swipe; confirm with the Choose control.
+ * Horizontal snap carousel. Browse by swipe or arrows; confirm with Choose.
  * @param {{
  *   options: { id: string, enabled?: boolean }[],
  *   selectedId?: string,
@@ -1489,6 +1548,7 @@ function buildSwipePicker(cfg) {
   const scroller = document.createElement("div");
   scroller.className = "char-carousel swipe-picker-track";
   scroller.tabIndex = 0;
+  scroller.setAttribute("role", "listbox");
   scroller.setAttribute("aria-label", cfg.ariaLabel || "Swipe to choose");
 
   const slides = [];
@@ -1516,7 +1576,7 @@ function buildSwipePicker(cfg) {
   count.className = "char-carousel-count swipe-picker-count";
   const hint = document.createElement("p");
   hint.className = "swipe-picker-hint";
-  hint.textContent = "Swipe sideways";
+  hint.textContent = "Swipe or tap arrows";
   meta.append(count, hint);
 
   const dots = document.createElement("div");
@@ -1529,6 +1589,20 @@ function buildSwipePicker(cfg) {
     dots.appendChild(dot);
   });
 
+  const nav = document.createElement("div");
+  nav.className = "swipe-picker-nav";
+  const prevBtn = document.createElement("button");
+  prevBtn.type = "button";
+  prevBtn.className = "swipe-picker-arrow";
+  prevBtn.setAttribute("aria-label", "Previous");
+  prevBtn.textContent = "‹";
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.className = "swipe-picker-arrow";
+  nextBtn.setAttribute("aria-label", "Next");
+  nextBtn.textContent = "›";
+  nav.append(prevBtn, nextBtn);
+
   const choose = document.createElement("button");
   choose.type = "button";
   choose.className = "swipe-picker-choose";
@@ -1538,13 +1612,21 @@ function buildSwipePicker(cfg) {
   actions.className = "swipe-picker-actions";
   actions.appendChild(choose);
 
+  const slideWidth = () => Math.max(1, scroller.clientWidth || slides[0]?.offsetWidth || 1);
+
+  const currentIndex = () => {
+    if (!options.length) return 0;
+    return Math.min(options.length - 1, Math.max(0, Math.round(scroller.scrollLeft / slideWidth())));
+  };
+
   const paint = () => {
-    const width = scroller.clientWidth || 1;
-    const index = Math.min(options.length - 1, Math.max(0, Math.round(scroller.scrollLeft / width)));
+    const index = currentIndex();
     const opt = options[index];
     count.textContent = options.length ? `${index + 1} / ${options.length}` : "";
     [...dots.children].forEach((dot, i) => dot.classList.toggle("is-active", i === index));
     slides.forEach((slide, i) => slide.classList.toggle("selected", i === index));
+    prevBtn.disabled = index <= 0;
+    nextBtn.disabled = index >= options.length - 1;
     if (opt) {
       choose.dataset.optionId = opt.id;
       choose.disabled = opt.enabled === false;
@@ -1557,13 +1639,109 @@ function buildSwipePicker(cfg) {
     return index;
   };
 
-  scroller.addEventListener("scroll", () => paint(), { passive: true });
-  footer.append(meta, dots, actions);
+  const goTo = (index, smooth = true) => {
+    if (!options.length) return;
+    const i = Math.min(options.length - 1, Math.max(0, index));
+    const left = i * slideWidth();
+    if (smooth && typeof scroller.scrollTo === "function") {
+      scroller.scrollTo({ left, behavior: "smooth" });
+    } else {
+      scroller.scrollLeft = left;
+    }
+    paint();
+  };
+
+  // Native overflow-x often fails under the phone CSS rotate + Safari chrome hack.
+  // Drive the carousel with pointer drag mapped into scroll space.
+  let drag = null;
+  const endDrag = (ev) => {
+    if (!drag || (ev && drag.pointerId != null && ev.pointerId !== drag.pointerId)) return;
+    const moved = Math.abs(drag.axisTotal) > 10;
+    const width = slideWidth();
+    const projected = drag.startScroll + (drag.inverted ? 1 : -1) * drag.axisTotal;
+    const index = Math.min(options.length - 1, Math.max(0, Math.round(projected / width)));
+    try {
+      scroller.releasePointerCapture?.(drag.pointerId);
+    } catch (_) {
+      /* ignore */
+    }
+    drag = null;
+    scroller.classList.remove("is-dragging");
+    goTo(index, true);
+    if (moved && ev) {
+      ev.preventDefault?.();
+      ev.stopPropagation?.();
+    }
+  };
+
+  scroller.addEventListener(
+    "pointerdown",
+    (ev) => {
+      if (ev.button != null && ev.button !== 0) return;
+      if (ev.target instanceof Element && ev.target.closest("button,a,input")) return;
+      drag = {
+        pointerId: ev.pointerId,
+        lastX: ev.clientX,
+        lastY: ev.clientY,
+        startScroll: scroller.scrollLeft,
+        axisTotal: 0,
+        inverted: isCssRotatedPhoneLayout(),
+      };
+      scroller.classList.add("is-dragging");
+      try {
+        scroller.setPointerCapture(ev.pointerId);
+      } catch (_) {
+        /* ignore */
+      }
+    },
+    { passive: true }
+  );
+
+  scroller.addEventListener(
+    "pointermove",
+    (ev) => {
+      if (!drag || ev.pointerId !== drag.pointerId) return;
+      const dx = ev.clientX - drag.lastX;
+      const dy = ev.clientY - drag.lastY;
+      drag.lastX = ev.clientX;
+      drag.lastY = ev.clientY;
+      const axis = swipeAxisDelta(dx, dy);
+      drag.axisTotal += axis;
+      scroller.scrollLeft = drag.startScroll + (drag.inverted ? 1 : -1) * drag.axisTotal;
+      paint();
+      if (Math.abs(drag.axisTotal) > 6) ev.preventDefault();
+    },
+    { passive: false }
+  );
+
+  scroller.addEventListener("pointerup", endDrag);
+  scroller.addEventListener("pointercancel", endDrag);
+  scroller.addEventListener("lostpointercapture", endDrag);
+
+  prevBtn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    goTo(currentIndex() - 1);
+  });
+  nextBtn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    goTo(currentIndex() + 1);
+  });
+
+  scroller.addEventListener(
+    "scroll",
+    () => {
+      if (!drag) paint();
+    },
+    { passive: true }
+  );
+
+  footer.append(meta, dots, nav, actions);
   wrap.append(scroller, footer);
 
   requestAnimationFrame(() => {
-    if (slides[startIndex]) scroller.scrollLeft = slides[startIndex].offsetLeft;
-    paint();
+    goTo(startIndex, false);
   });
 
   return {
@@ -1572,9 +1750,7 @@ function buildSwipePicker(cfg) {
     choose,
     actions,
     getSelected() {
-      const width = scroller.clientWidth || 1;
-      const index = Math.min(options.length - 1, Math.max(0, Math.round(scroller.scrollLeft / width)));
-      return options[index] || null;
+      return options[currentIndex()] || null;
     },
   };
 }
@@ -2749,7 +2925,7 @@ function drawPlayer(p) {
           return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
         })()
       : dragonIdleBlit;
-    const s = Math.min((PLAYER_BODY_W * 1.14) / bl.cw, (PLAYER_BODY_H * 1.04) / bl.ch);
+    const s = Math.min(PLAYER_DRAW_W / bl.cw, PLAYER_DRAW_H / bl.ch);
     const dw = bl.cw * s;
     const dh = bl.ch * s;
     const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1) + freezeVibeX;
@@ -2784,7 +2960,7 @@ function drawPlayer(p) {
           return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
         })()
       : funusIdleBlit;
-    const s = Math.min((PLAYER_BODY_W * 1.02) / bl.cw, (PLAYER_BODY_H * 1.02) / bl.ch);
+    const s = Math.min(PLAYER_DRAW_W / bl.cw, PLAYER_DRAW_H / bl.ch);
     const dw = bl.cw * s;
     const dh = bl.ch * s;
     const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1) + freezeVibeX;
@@ -2799,7 +2975,7 @@ function drawPlayer(p) {
     ctx.scale(funusFacing, 1);
     ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -dw / 2, -dh, dw, dh);
     ctx.restore();
-  } else if (idx === 0 && percivalIdleBlit) {
+  } else if (characterId === "knight" && idx === 0 && percivalIdleBlit) {
     const movingH =
       mode === "online"
         ? v.prevDrawX != null && Math.abs(p.x - v.prevDrawX) > 0.2
@@ -2817,7 +2993,7 @@ function drawPlayer(p) {
             return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
           })()
         : percivalIdleBlit;
-    const s = Math.min((PLAYER_BODY_W * 0.96) / bl.cw, (PLAYER_BODY_H * 0.99) / bl.ch);
+    const s = Math.min(PLAYER_DRAW_W / bl.cw, PLAYER_DRAW_H / bl.ch);
     const dw = bl.cw * s;
     const dh = bl.ch * s;
     const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1) + freezeVibeX;
@@ -2832,7 +3008,7 @@ function drawPlayer(p) {
     ctx.scale(p.facing || 1, 1);
     ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -dw / 2, -dh, dw, dh);
     ctx.restore();
-  } else if (idx === 1 && guy2IdleBlit) {
+  } else if (characterId === "knight" && idx === 1 && guy2IdleBlit) {
     const movingH =
       mode === "online"
         ? v.prevDrawX != null && Math.abs(p.x - v.prevDrawX) > 0.2
@@ -2850,7 +3026,7 @@ function drawPlayer(p) {
             return { canvas: fr.canvas, cx: fr.cx, cy: fr.cy, cw: fr.cw, ch: fr.ch };
           })()
         : guy2IdleBlit;
-    const s = Math.min((PLAYER_BODY_W * 0.96) / bl.cw, (PLAYER_BODY_H * 0.99) / bl.ch);
+    const s = Math.min(PLAYER_DRAW_W / bl.cw, PLAYER_DRAW_H / bl.ch);
     const dw = bl.cw * s;
     const dh = bl.ch * s;
     const footX = p.x + PLAYER_BODY_W / 2 - recoil * 4 * (p.facing || 1) + freezeVibeX;
@@ -2866,22 +3042,41 @@ function drawPlayer(p) {
     ctx.drawImage(bl.canvas, bl.cx, bl.cy, bl.cw, bl.ch, -dw / 2, -dh, dw, dh);
     ctx.restore();
   } else {
+    // Soft chibi fallback if a sprite sheet has not loaded yet.
     const body = idx === 0 ? "#2f7dff" : "#e44b4b";
+    const skin = "#f0c9a0";
+    const ox = Math.round(p.x + PLAYER_BODY_W / 2 + freezeVibeX);
+    const oy = Math.round(baseY + PLAYER_BODY_H + freezeVibeY);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = "#0a0a0a";
-    ctx.fillRect(px - 2 + freezeVibeX, py - 2 + freezeVibeY, PLAYER_BODY_W + 4, PLAYER_BODY_H + 4);
-    ctx.fillStyle = body;
-    ctx.fillRect(px + freezeVibeX, py + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
     if (recoil) {
-      ctx.fillStyle = "rgba(255,60,60,0.35)";
-      ctx.fillRect(px + freezeVibeX, py + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
+      ctx.fillStyle = "rgba(255,60,60,0.28)";
+      ctx.fillRect(px + freezeVibeX - 4, py + freezeVibeY - 8, PLAYER_BODY_W + 8, PLAYER_BODY_H + 10);
     }
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(ox - 11, oy - 50, 22, 12);
+    ctx.fillRect(ox - 9, oy - 40, 18, 22);
+    ctx.fillRect(ox - 12, oy - 28, 8, 18);
+    ctx.fillRect(ox + 4, oy - 28, 8, 18);
+    ctx.fillRect(ox - 8, oy - 18, 7, 18);
+    ctx.fillRect(ox + 1, oy - 18, 7, 18);
+    ctx.fillStyle = body;
+    ctx.fillRect(ox - 10, oy - 49, 20, 10);
+    ctx.fillRect(ox - 8, oy - 39, 16, 20);
+    ctx.fillRect(ox - 11, oy - 27, 6, 16);
+    ctx.fillRect(ox + 5, oy - 27, 6, 16);
+    ctx.fillRect(ox - 7, oy - 17, 5, 16);
+    ctx.fillRect(ox + 2, oy - 17, 5, 16);
+    ctx.fillStyle = skin;
+    ctx.fillRect(ox - 7, oy - 58, 14, 12);
+    ctx.fillStyle = "#1a120c";
+    ctx.fillRect(ox - 4, oy - 54, 2, 2);
+    ctx.fillRect(ox + 2, oy - 54, 2, 2);
     ctx.restore();
   }
 
   if (poisoned) {
-    const pulse = 0.16 + 0.16 * (0.5 + 0.5 * Math.sin(now * 0.03));
+    const pulse = 0.1 + 0.08 * (0.5 + 0.5 * Math.sin(now * 0.03));
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = `rgba(56, 214, 92, ${pulse.toFixed(3)})`;
@@ -2889,19 +3084,25 @@ function drawPlayer(p) {
     ctx.restore();
   }
   if (burning) {
-    const pulse = 0.22 + 0.28 * (0.5 + 0.5 * Math.sin(now * 0.045));
+    const pulse = 0.12 + 0.14 * (0.5 + 0.5 * Math.sin(now * 0.045));
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.globalCompositeOperation = "lighter";
     ctx.fillStyle = `rgba(255, 55, 40, ${pulse.toFixed(3)})`;
-    ctx.fillRect(px + freezeVibeX, py + freezeVibeY, PLAYER_BODY_W, PLAYER_BODY_H);
+    ctx.fillRect(px + freezeVibeX, py + freezeVibeY, PLAYER_BODY_W, 6);
     ctx.fillStyle = `rgba(255, 160, 60, ${(pulse * 0.55).toFixed(3)})`;
-    ctx.fillRect(px + freezeVibeX, py + freezeVibeY + 4, PLAYER_BODY_W, Math.max(8, PLAYER_BODY_H - 8));
+    ctx.fillRect(px + freezeVibeX, py + freezeVibeY + PLAYER_BODY_H - 10, PLAYER_BODY_W, 10);
     ctx.restore();
   }
 
   drawFighterHealthBar(p, baseY, idx);
-  if (!addonFighter) drawFighterTopColorBand(p, baseY, idx);
+  // Color band only for the plain rectangle fallback — sprites already show who is who.
+  const drewSprite =
+    addonFighter ||
+    (characterId === "dragon" && !!dragonIdleBlit) ||
+    (characterId === "funus" && !!funusIdleBlit) ||
+    (characterId === "knight" && ((idx === 0 && !!percivalIdleBlit) || (idx === 1 && !!guy2IdleBlit)));
+  if (!drewSprite) drawFighterTopColorBand(p, baseY, idx);
 
   if (attackPose) drawMeleeSwingIndicator(p, v, baseY);
   else if (addonFighter && window.Fighters) {
