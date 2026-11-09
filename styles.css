@@ -1542,7 +1542,7 @@ button.lobby-decline {
   margin: 0;
 }
 
-/* Chrome visible: document must be user-scrollable (programmatic scrollTo will not hide Safari tabs). */
+/* Chrome visible: document must be user-scrollable. Avoid style thrash while scrolling. */
 html.safari-scroll-hack.safari-chrome-open {
   position: static !important;
   inset: auto !important;
@@ -1551,8 +1551,9 @@ html.safari-scroll-hack.safari-chrome-open {
   min-height: 100% !important;
   overflow-x: hidden !important;
   overflow-y: scroll !important;
+  -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
-  overscroll-behavior-y: auto;
+  overscroll-behavior-y: none;
 }
 
 html.safari-scroll-hack.safari-chrome-open body {
@@ -1562,16 +1563,20 @@ html.safari-scroll-hack.safari-chrome-open body {
   height: auto !important;
   overflow: visible !important;
   touch-action: pan-y;
-  overscroll-behavior-y: auto;
+  overscroll-behavior-y: none;
+  background: #121724;
 }
 
 html.safari-scroll-hack.safari-chrome-open .safari-nudge {
   display: block;
+  width: 1px;
+  margin-left: -1px;
+  pointer-events: none;
+  background: transparent;
 }
 
 html.safari-scroll-hack.safari-chrome-open .app {
-  /* Sticky (not fixed) so a vertical swipe on the game can scroll the document.
-     Height is set in px from JS so mid-swipe dvh growth can't thrash layout. */
+  /* Sticky so the game stays put while the page scrolls under the finger. */
   position: sticky !important;
   top: 0 !important;
   left: 0 !important;
@@ -1584,6 +1589,7 @@ html.safari-scroll-hack.safari-chrome-open .app {
   transform: none !important;
   overflow: hidden;
   touch-action: pan-y;
+  will-change: transform;
 }
 
 html.safari-scroll-hack.safari-chrome-open #gameCanvas,
@@ -1593,27 +1599,29 @@ html.safari-scroll-hack.safari-chrome-open .play-stage {
   touch-action: pan-y !important;
 }
 
-/* Chrome collapsed: lock the expanded viewport so the bars stay away. */
+/* Soft lock after bars collapse — relative + dvh (not body position:fixed, which snaps tabs back). */
 html.safari-scroll-hack.safari-chrome-locked,
 html.safari-scroll-hack.safari-chrome-locked body {
-  position: fixed !important;
-  inset: 0 !important;
+  position: relative !important;
+  inset: auto !important;
   width: 100% !important;
   height: 100% !important;
+  height: 100dvh !important;
   overflow: hidden !important;
   overscroll-behavior: none;
   touch-action: manipulation;
 }
 
 html.safari-scroll-hack.safari-chrome-locked .safari-nudge {
-  display: none;
+  display: none !important;
+  height: 0 !important;
 }
 
 html.safari-scroll-hack.safari-chrome-locked .app {
   position: fixed !important;
-  inset: auto !important;
-  left: 0;
-  top: 0;
+  inset: 0 !important;
+  width: 100% !important;
+  height: var(--safari-vvh, 100dvh) !important;
   min-height: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
