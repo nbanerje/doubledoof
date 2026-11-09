@@ -1570,14 +1570,14 @@ html.safari-scroll-hack.safari-chrome-open .safari-nudge {
 }
 
 html.safari-scroll-hack.safari-chrome-open .app {
-  /* Sticky (not fixed) so a vertical swipe on the game can scroll the document. */
+  /* Sticky (not fixed) so a vertical swipe on the game can scroll the document.
+     Height is set in px from JS so mid-swipe dvh growth can't thrash layout. */
   position: sticky !important;
   top: 0 !important;
   left: 0 !important;
   right: auto !important;
   bottom: auto !important;
   width: 100% !important;
-  height: 100dvh !important;
   min-height: 0 !important;
   margin: 0 !important;
   padding: 0 !important;

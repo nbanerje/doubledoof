@@ -2324,15 +2324,33 @@ function isLandscapeViewport() {
 
 /**
  * Safari only collapses URL/tab bars when the *document* is scrolled by the user.
- * Programmatic scrollTo does not work. Detect chrome via visualViewport vs screen.
+ * Programmatic scrollTo does not work — and scrollTo(0)/locking mid-swipe snaps chrome back.
  */
-function safariChromeIsOpen() {
+let safariLocked = false;
+let safariCollapseTimer = 0;
+let safariTouching = false;
+let safariMeasureRaf = 0;
+let safariStickyHeightPx = 0;
+
+function safariScreenShort() {
+  return Math.min(window.screen?.width || 0, window.screen?.height || 0);
+}
+
+/** 1 = visual viewport fills the short screen edge (chrome mostly gone). */
+function safariChromeFill() {
   const vv = window.visualViewport;
-  if (!vv) return false;
-  const screenShort = Math.min(window.screen?.width || 0, window.screen?.height || 0);
-  if (!screenShort) return false;
-  // Leave a little slack for the never-fully-hidden status strip on some browsers.
-  return vv.height + (vv.offsetTop || 0) < screenShort - 20;
+  const short = safariScreenShort();
+  if (!vv || !short) return 1;
+  return (vv.height + (vv.offsetTop || 0)) / short;
+}
+
+function safariChromeCollapsed() {
+  // Hysteresis high-water: only treat as collapsed when nearly full-bleed.
+  return safariChromeFill() >= 0.935 && (window.scrollY || 0) > 24;
+}
+
+function safariChromeClearlyOpen() {
+  return safariChromeFill() < 0.86;
 }
 
 function safariLandscapeNudgeNeeded() {
@@ -2347,6 +2365,11 @@ function clearSafariInlineLayout() {
   const app = document.querySelector(".app");
   document.body.style.height = "";
   document.body.style.minHeight = "";
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.right = "";
+  document.body.style.width = "";
   const nudge = document.getElementById("safariNudge");
   if (nudge) nudge.style.height = "";
   if (app) {
@@ -2362,16 +2385,10 @@ function clearSafariInlineLayout() {
 function pinAppToVisibleScreen() {
   const app = document.querySelector(".app");
   if (!app) return;
-  const root = document.documentElement;
-  // While chrome is open the app stays sticky in normal flow so the user can scroll.
-  // Only pin with fixed coordinates after Safari bars have collapsed.
-  if (!root.classList.contains("safari-chrome-locked")) {
-    app.style.top = "";
-    app.style.left = "";
-    app.style.right = "";
-    app.style.bottom = "";
-    app.style.width = "";
-    app.style.height = "";
+  if (!safariLocked) {
+    if (safariStickyHeightPx > 0 && document.documentElement.classList.contains("safari-chrome-open")) {
+      app.style.height = `${safariStickyHeightPx}px`;
+    }
     return;
   }
   const vv = window.visualViewport;
@@ -2387,51 +2404,121 @@ function pinAppToVisibleScreen() {
   app.style.height = `${height}px`;
 }
 
-let safariChromeWasOpen = null;
-let safariMeasureRaf = 0;
+function unlockSafariChromeHack() {
+  const root = document.documentElement;
+  const hint = document.getElementById("safariChromeHint");
+  if (safariCollapseTimer) {
+    window.clearTimeout(safariCollapseTimer);
+    safariCollapseTimer = 0;
+  }
+  safariLocked = false;
+  safariStickyHeightPx = 0;
+  root.classList.remove("safari-scroll-hack", "safari-chrome-open", "safari-chrome-locked");
+  if (hint) hint.hidden = true;
+  clearSafariInlineLayout();
+}
 
-function updateSafariChromeHack() {
+function applySafariScrollableLayout() {
   const root = document.documentElement;
   const nudge = document.getElementById("safariNudge");
   const hint = document.getElementById("safariChromeHint");
+  const app = document.querySelector(".app");
+  const vvH = Math.round(window.visualViewport?.height || window.innerHeight);
+  // Freeze sticky height to the chrome-visible viewport so dvh growth mid-swipe can't thrash layout.
+  if (!safariStickyHeightPx) safariStickyHeightPx = vvH;
+  const pad = Math.max(safariStickyHeightPx * 1.6, 1100);
+  root.classList.add("safari-scroll-hack", "safari-chrome-open");
+  root.classList.remove("safari-chrome-locked");
+  if (nudge) nudge.style.height = `${pad}px`;
+  document.body.style.minHeight = `${safariStickyHeightPx + pad}px`;
+  document.body.style.height = "";
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.right = "";
+  document.body.style.width = "";
+  if (app) {
+    app.style.width = "";
+    app.style.left = "";
+    app.style.top = "";
+    app.style.right = "";
+    app.style.bottom = "";
+    app.style.height = `${safariStickyHeightPx}px`;
+  }
+  if (hint) hint.hidden = false;
+}
+
+function lockSafariChromeHack() {
+  const root = document.documentElement;
+  const nudge = document.getElementById("safariNudge");
+  const hint = document.getElementById("safariChromeHint");
+  const app = document.querySelector(".app");
+  // Freeze without scrollTo(0) — resetting scroll is what snaps Safari bars back.
+  const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+  safariLocked = true;
+  if (safariCollapseTimer) {
+    window.clearTimeout(safariCollapseTimer);
+    safariCollapseTimer = 0;
+  }
+  root.classList.add("safari-scroll-hack", "safari-chrome-locked");
+  root.classList.remove("safari-chrome-open");
+  if (hint) hint.hidden = true;
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${scrollY}px`;
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+  document.body.style.width = "100%";
+  document.body.style.height = "";
+  document.body.style.minHeight = "";
+  if (nudge) nudge.style.height = "0px";
+  if (app) {
+    app.style.height = "";
+  }
+  pinAppToVisibleScreen();
+  // After layout settles on the expanded viewport, drop the offset freeze and pin cleanly.
+  window.setTimeout(() => {
+    if (!safariLocked) return;
+    document.body.style.position = "fixed";
+    document.body.style.top = "0";
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+    pinAppToVisibleScreen();
+  }, 120);
+}
+
+function updateSafariChromeHack() {
+  const root = document.documentElement;
   if (!safariLandscapeNudgeNeeded()) {
-    root.classList.remove("safari-scroll-hack", "safari-chrome-open", "safari-chrome-locked");
-    if (hint) hint.hidden = true;
-    clearSafariInlineLayout();
+    unlockSafariChromeHack();
     if (window.scrollY) window.scrollTo(0, 0);
-    safariChromeWasOpen = null;
     return;
   }
 
-  const open = safariChromeIsOpen();
-  root.classList.add("safari-scroll-hack");
-  root.classList.toggle("safari-chrome-open", open);
-  root.classList.toggle("safari-chrome-locked", !open);
-
-  if (open) {
-    // Tall document so the user can swipe the page itself (required to collapse Safari chrome).
-    const vvH = window.visualViewport?.height || window.innerHeight;
-    const pad = Math.max(vvH * 1.35, 900);
-    if (nudge) nudge.style.height = `${pad}px`;
-    document.body.style.minHeight = `${vvH + pad}px`;
-    document.body.style.height = "";
-    if (hint) hint.hidden = false;
-    // Sticky/fixed game stays on screen; document scroll happens via the spacer below.
+  // Once locked, stay locked for this landscape session — unlocking mid-match reopens tabs.
+  if (safariLocked) {
+    root.classList.add("safari-scroll-hack", "safari-chrome-locked");
+    root.classList.remove("safari-chrome-open");
     pinAppToVisibleScreen();
-  } else {
-    if (nudge) nudge.style.height = "0px";
-    document.body.style.height = "";
-    document.body.style.minHeight = "";
-    if (hint) hint.hidden = true;
-    if (window.scrollY) window.scrollTo(0, 0);
-    pinAppToVisibleScreen();
+    return;
   }
 
-  if (safariChromeWasOpen === true && open === false) {
-    // Just collapsed — keep locked to the expanded viewport.
-    pinAppToVisibleScreen();
+  applySafariScrollableLayout();
+
+  // Only commit the lock after the finger is up and chrome has stayed collapsed briefly.
+  // Locking during the swipe (or calling scrollTo) makes Safari snap the tabs back.
+  if (safariChromeCollapsed() && !safariTouching) {
+    if (!safariCollapseTimer) {
+      safariCollapseTimer = window.setTimeout(() => {
+        safariCollapseTimer = 0;
+        if (!safariLandscapeNudgeNeeded() || safariLocked || safariTouching) return;
+        if (safariChromeCollapsed()) lockSafariChromeHack();
+      }, 320);
+    }
+  } else if (safariCollapseTimer && (safariTouching || safariChromeClearlyOpen())) {
+    window.clearTimeout(safariCollapseTimer);
+    safariCollapseTimer = 0;
   }
-  safariChromeWasOpen = open;
 }
 
 function scheduleSafariLandscapeNudge() {
@@ -2443,7 +2530,11 @@ function scheduleSafariLandscapeNudge() {
 }
 
 window.addEventListener("resize", scheduleSafariLandscapeNudge, { passive: true });
-window.addEventListener("orientationchange", scheduleSafariLandscapeNudge, { passive: true });
+window.addEventListener("orientationchange", () => {
+  // New orientation = new session; allow chrome hide flow again.
+  unlockSafariChromeHack();
+  scheduleSafariLandscapeNudge();
+}, { passive: true });
 window.addEventListener("pageshow", scheduleSafariLandscapeNudge, { passive: true });
 window.addEventListener("scroll", scheduleSafariLandscapeNudge, { passive: true });
 document.addEventListener("fullscreenchange", scheduleSafariLandscapeNudge);
@@ -2451,15 +2542,49 @@ document.addEventListener("webkitfullscreenchange", scheduleSafariLandscapeNudge
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) scheduleSafariLandscapeNudge();
 });
+document.addEventListener(
+  "touchstart",
+  () => {
+    safariTouching = true;
+    if (safariCollapseTimer) {
+      window.clearTimeout(safariCollapseTimer);
+      safariCollapseTimer = 0;
+    }
+  },
+  { passive: true }
+);
+document.addEventListener(
+  "touchend",
+  () => {
+    safariTouching = false;
+    scheduleSafariLandscapeNudge();
+  },
+  { passive: true }
+);
+document.addEventListener(
+  "touchcancel",
+  () => {
+    safariTouching = false;
+    scheduleSafariLandscapeNudge();
+  },
+  { passive: true }
+);
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", scheduleSafariLandscapeNudge, { passive: true });
-  window.visualViewport.addEventListener("scroll", () => {
-    pinAppToVisibleScreen();
-    scheduleSafariLandscapeNudge();
-  }, { passive: true });
+  window.visualViewport.addEventListener(
+    "scroll",
+    () => {
+      pinAppToVisibleScreen();
+      scheduleSafariLandscapeNudge();
+    },
+    { passive: true }
+  );
 }
 if (window.screen?.orientation?.addEventListener) {
-  window.screen.orientation.addEventListener("change", scheduleSafariLandscapeNudge);
+  window.screen.orientation.addEventListener("change", () => {
+    unlockSafariChromeHack();
+    scheduleSafariLandscapeNudge();
+  });
 }
 
 function enterImmersivePlay() {
@@ -2491,16 +2616,10 @@ document.addEventListener(
   },
   { passive: true }
 );
-document.addEventListener(
-  "touchstart",
-  () => {
-    scheduleSafariLandscapeNudge();
-  },
-  { passive: true }
-);
 scheduleSafariLandscapeNudge();
 setTimeout(scheduleSafariLandscapeNudge, 250);
 setTimeout(scheduleSafariLandscapeNudge, 800);
+
 const touchState = {
   enabled: isTouchDevice,
   left: false,
