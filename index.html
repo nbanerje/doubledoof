@@ -19,7 +19,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=27" />
+    <link rel="stylesheet" href="./styles.css?v=28" />
   </head>
   <body>
     <!-- Playgama / ISL Safari landscape fullscreen shell -->
@@ -57,16 +57,28 @@
         </div>
         </div>
         <div id="touchOverlay" class="touch-overlay hidden" aria-hidden="true">
-          <div class="touch-cluster touch-left">
-            <div id="touchJoystick" class="touch-joystick" aria-label="Movement joystick">
+          <div class="touch-cluster touch-left touch-p0-move">
+            <div id="touchJoystick" class="touch-joystick" data-touch-player="0" aria-label="Blue movement">
               <div id="touchStick" class="touch-stick"></div>
             </div>
           </div>
-          <div class="touch-cluster touch-right">
-            <button type="button" data-touch-action="jump" class="touch-btn">Jump</button>
-            <button type="button" data-touch-action="attack" class="touch-btn touch-btn--attack">Melee</button>
-            <button type="button" data-touch-action="orb" class="touch-btn touch-btn--attack">Orb</button>
-            <button type="button" data-touch-action="fire" class="touch-btn touch-btn--attack touch-btn--fire hidden">Fire</button>
+          <div class="touch-cluster touch-p0-actions touch-right">
+            <button type="button" data-touch-player="0" data-touch-action="jump" class="touch-btn">Jump</button>
+            <button type="button" data-touch-player="0" data-touch-action="attack" class="touch-btn touch-btn--attack">Melee</button>
+            <button type="button" data-touch-player="0" data-touch-action="orb" class="touch-btn touch-btn--attack">Orb</button>
+            <button type="button" data-touch-player="0" data-touch-action="fire" class="touch-btn touch-btn--attack touch-btn--fire hidden">Fire</button>
+          </div>
+          <div class="touch-cluster touch-p1-actions touch-p2-only">
+            <span class="touch-pad-label" aria-hidden="true">Red</span>
+            <button type="button" data-touch-player="1" data-touch-action="jump" class="touch-btn">Jump</button>
+            <button type="button" data-touch-player="1" data-touch-action="attack" class="touch-btn touch-btn--attack">Melee</button>
+            <button type="button" data-touch-player="1" data-touch-action="orb" class="touch-btn touch-btn--attack">Orb</button>
+            <button type="button" data-touch-player="1" data-touch-action="fire" class="touch-btn touch-btn--attack touch-btn--fire hidden">Fire</button>
+          </div>
+          <div class="touch-cluster touch-p1-move touch-p2-only">
+            <div id="touchJoystickP1" class="touch-joystick touch-joystick--p1" data-touch-player="1" aria-label="Red movement">
+              <div id="touchStickP1" class="touch-stick touch-stick--p1"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -125,7 +137,7 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="./addonCatalog.js?v=1"></script>
     <script src="./fighters.js?v=3"></script>
-    <script src="./safariFullscreen.js?v=2"></script>
-    <script src="./game.js?v=42"></script>
+    <script src="./safariFullscreen.js?v=3"></script>
+    <script src="./game.js?v=43"></script>
   </body>
   </html>

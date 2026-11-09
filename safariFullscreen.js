@@ -31,8 +31,17 @@
     return String(type).startsWith("landscape");
   }
 
+  function arcadeBlockingChromeHide() {
+    // Lobby / setup / code entry must stay tappable — chrome-hide steals the page.
+    const arcade = document.getElementById("arcadeOverlay");
+    if (arcade && !arcade.classList.contains("hidden")) return true;
+    const buff = document.getElementById("buffPickOverlay");
+    if (buff && !buff.classList.contains("hidden")) return true;
+    return false;
+  }
+
   function shouldRun() {
-    return isIosPhone() && !isStandalone() && isLandscape();
+    return isIosPhone() && !isStandalone() && isLandscape() && !arcadeBlockingChromeHide();
   }
 
   function tabsAreOpen() {
@@ -185,16 +194,28 @@
     }
     const tip = overlay();
     if (tip) {
-      tip.style.pointerEvents = "auto";
-      tip.addEventListener(
+      // Keep the full-screen shell pass-through; only the pill catches taps.
+      tip.style.pointerEvents = "";
+      const pill = tip.querySelector("p");
+      const tapTarget = pill || tip;
+      tapTarget.addEventListener(
         "pointerdown",
         (ev) => {
           if (tip.hidden) return;
           ev.preventDefault();
+          ev.stopPropagation();
           scrollChromeAway();
         },
         { passive: false }
       );
+    }
+    // When setup/lobby opens or closes, re-evaluate so code entry isn't blocked.
+    const arcade = document.getElementById("arcadeOverlay");
+    if (arcade && typeof MutationObserver === "function") {
+      new MutationObserver(() => {
+        tabsOpen = null;
+        measure();
+      }).observe(arcade, { attributes: true, attributeFilter: ["class"] });
     }
   }
 
