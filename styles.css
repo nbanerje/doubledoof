@@ -1542,29 +1542,14 @@ button.lobby-decline {
   margin: 0;
 }
 
-/* Chrome visible: document must be user-scrollable. Avoid style thrash while scrolling. */
+/* Brief auto-scroll runway used only during the tap-triggered hide attempt. */
 html.safari-scroll-hack.safari-chrome-open {
   position: static !important;
-  inset: auto !important;
   width: 100% !important;
   height: auto !important;
-  min-height: 100% !important;
   overflow-x: hidden !important;
   overflow-y: scroll !important;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
-  overscroll-behavior-y: none;
-}
-
-html.safari-scroll-hack.safari-chrome-open body {
-  position: static !important;
-  inset: auto !important;
-  width: 100% !important;
-  height: auto !important;
-  overflow: visible !important;
-  touch-action: pan-y;
-  overscroll-behavior-y: none;
-  background: #121724;
 }
 
 html.safari-scroll-hack.safari-chrome-open .safari-nudge {
@@ -1572,59 +1557,38 @@ html.safari-scroll-hack.safari-chrome-open .safari-nudge {
   width: 1px;
   margin-left: -1px;
   pointer-events: none;
-  background: transparent;
 }
 
-html.safari-scroll-hack.safari-chrome-open .app {
-  /* Sticky so the game stays put while the page scrolls under the finger. */
-  position: sticky !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: auto !important;
-  bottom: auto !important;
-  width: 100% !important;
-  min-height: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  transform: none !important;
-  overflow: hidden;
-  touch-action: pan-y;
-  will-change: transform;
-}
-
-html.safari-scroll-hack.safari-chrome-open #gameCanvas,
-html.safari-scroll-hack.safari-chrome-open .touch-overlay,
-html.safari-scroll-hack.safari-chrome-open .game-wrap,
-html.safari-scroll-hack.safari-chrome-open .play-stage {
-  touch-action: pan-y !important;
-}
-
-/* Soft lock after bars collapse — relative + dvh (not body position:fixed, which snaps tabs back). */
-html.safari-scroll-hack.safari-chrome-locked,
-html.safari-scroll-hack.safari-chrome-locked body {
-  position: relative !important;
-  inset: auto !important;
-  width: 100% !important;
-  height: 100% !important;
-  height: 100dvh !important;
+/* Always-on fit: game fills the visible viewport (above Safari tabs if they stay). */
+html.safari-vv-fit,
+html.safari-scroll-hack.safari-chrome-locked {
   overflow: hidden !important;
   overscroll-behavior: none;
   touch-action: manipulation;
 }
 
+html.safari-vv-fit body,
+html.safari-scroll-hack.safari-chrome-locked body {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  position: relative !important;
+  width: 100% !important;
+  height: 100% !important;
+  height: 100dvh !important;
+}
+
+html.safari-vv-fit .safari-nudge,
 html.safari-scroll-hack.safari-chrome-locked .safari-nudge {
   display: none !important;
   height: 0 !important;
 }
 
+html.safari-vv-fit .app,
 html.safari-scroll-hack.safari-chrome-locked .app {
   position: fixed !important;
-  inset: 0 !important;
-  width: 100% !important;
-  height: var(--safari-vvh, 100dvh) !important;
-  min-height: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
   transform: none !important;
   overflow: hidden;
+  min-height: 0 !important;
 }
