@@ -1515,42 +1515,108 @@ button.lobby-decline {
   pointer-events: none;
 }
 
-html.safari-scroll-hack {
+.safari-chrome-hint {
+  position: fixed;
+  left: 50%;
+  bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  z-index: 100000;
+  transform: translateX(-50%);
+  max-width: min(92vw, 420px);
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(8, 12, 24, 0.82);
+  color: #f4f7ff;
+  font: 600 0.92rem/1.25 "DM Sans", "Segoe UI", sans-serif;
+  letter-spacing: 0.01em;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.safari-chrome-hint[hidden] {
+  display: none !important;
+}
+
+.safari-chrome-hint p {
+  margin: 0;
+}
+
+/* Chrome visible: document must be user-scrollable (programmatic scrollTo will not hide Safari tabs). */
+html.safari-scroll-hack.safari-chrome-open {
   position: static !important;
   inset: auto !important;
   width: 100% !important;
-  height: 100% !important;
+  height: auto !important;
   min-height: 100% !important;
   overflow-x: hidden !important;
   overflow-y: scroll !important;
   touch-action: pan-y;
-  overscroll-behavior-y: none;
+  overscroll-behavior-y: auto;
 }
 
-html.safari-scroll-hack body {
+html.safari-scroll-hack.safari-chrome-open body {
   position: static !important;
   inset: auto !important;
   width: 100% !important;
-  /* JS sets an explicit taller height so window.scrollTo can move the page. */
-  min-height: 100% !important;
+  height: auto !important;
   overflow: visible !important;
   touch-action: pan-y;
-  overscroll-behavior-y: none;
+  overscroll-behavior-y: auto;
 }
 
-html.safari-scroll-hack .safari-nudge {
+html.safari-scroll-hack.safari-chrome-open .safari-nudge {
   display: block;
 }
 
-html.safari-scroll-hack .app {
-  position: fixed !important;
-  inset: auto !important;
+html.safari-scroll-hack.safari-chrome-open .app {
+  /* Sticky (not fixed) so a vertical swipe on the game can scroll the document. */
+  position: sticky !important;
+  top: 0 !important;
+  left: 0 !important;
   right: auto !important;
   bottom: auto !important;
+  width: 100% !important;
+  height: 100dvh !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  transform: none !important;
+  overflow: hidden;
+  touch-action: pan-y;
+}
+
+html.safari-scroll-hack.safari-chrome-open #gameCanvas,
+html.safari-scroll-hack.safari-chrome-open .touch-overlay,
+html.safari-scroll-hack.safari-chrome-open .game-wrap,
+html.safari-scroll-hack.safari-chrome-open .play-stage {
+  touch-action: pan-y !important;
+}
+
+/* Chrome collapsed: lock the expanded viewport so the bars stay away. */
+html.safari-scroll-hack.safari-chrome-locked,
+html.safari-scroll-hack.safari-chrome-locked body {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+html.safari-scroll-hack.safari-chrome-locked .safari-nudge {
+  display: none;
+}
+
+html.safari-scroll-hack.safari-chrome-locked .app {
+  position: fixed !important;
+  inset: auto !important;
   left: 0;
   top: 0;
   min-height: 0 !important;
   margin: 0 !important;
+  padding: 0 !important;
   transform: none !important;
   overflow: hidden;
 }

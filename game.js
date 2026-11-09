@@ -2306,8 +2306,6 @@ const touchStickEl = document.getElementById("touchStick");
 const isTouchDevice =
   window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window || navigator.maxTouchPoints > 0;
 
-const SAFARI_NUDGE_MIN_PX = 100;
-
 function isBundledApp() {
   const origin =
     (typeof window.DOUBLEDOOF_SERVER === "string" && window.DOUBLEDOOF_SERVER) ||
@@ -2318,24 +2316,56 @@ function isBundledApp() {
 
 function isLandscapeViewport() {
   if (window.matchMedia("(orientation: landscape)").matches) return true;
-  if (typeof window.orientation === "number" && (Math.abs(window.orientation) === 90)) return true;
+  if (typeof window.orientation === "number" && Math.abs(window.orientation) === 90) return true;
   const screenOrientation = window.screen?.orientation?.type || "";
   if (String(screenOrientation).startsWith("landscape")) return true;
   return window.innerWidth > window.innerHeight;
 }
 
+/**
+ * Safari only collapses URL/tab bars when the *document* is scrolled by the user.
+ * Programmatic scrollTo does not work. Detect chrome via visualViewport vs screen.
+ */
+function safariChromeIsOpen() {
+  const vv = window.visualViewport;
+  if (!vv) return false;
+  const screenShort = Math.min(window.screen?.width || 0, window.screen?.height || 0);
+  if (!screenShort) return false;
+  // Leave a little slack for the never-fully-hidden status strip on some browsers.
+  return vv.height + (vv.offsetTop || 0) < screenShort - 20;
+}
+
 function safariLandscapeNudgeNeeded() {
   if (isBundledApp() || isStandaloneDisplay()) return false;
   if (document.fullscreenElement || document.webkitFullscreenElement) return false;
+  if (!isIosBrowser()) return false;
   const coarse = window.matchMedia("(pointer: coarse)").matches || isTouchDevice;
   return coarse && isLandscapeViewport();
+}
+
+function clearSafariInlineLayout() {
+  const app = document.querySelector(".app");
+  document.body.style.height = "";
+  document.body.style.minHeight = "";
+  const nudge = document.getElementById("safariNudge");
+  if (nudge) nudge.style.height = "";
+  if (app) {
+    app.style.top = "";
+    app.style.left = "";
+    app.style.right = "";
+    app.style.bottom = "";
+    app.style.width = "";
+    app.style.height = "";
+  }
 }
 
 function pinAppToVisibleScreen() {
   const app = document.querySelector(".app");
   if (!app) return;
-  const hack = document.documentElement.classList.contains("safari-scroll-hack");
-  if (!hack) {
+  const root = document.documentElement;
+  // While chrome is open the app stays sticky in normal flow so the user can scroll.
+  // Only pin with fixed coordinates after Safari bars have collapsed.
+  if (!root.classList.contains("safari-chrome-locked")) {
     app.style.top = "";
     app.style.left = "";
     app.style.right = "";
@@ -2357,67 +2387,76 @@ function pinAppToVisibleScreen() {
   app.style.height = `${height}px`;
 }
 
-function safariNudgeDistance() {
-  const chromeGap = Math.max(0, (window.outerHeight || 0) - window.innerHeight);
-  const screenGap = Math.max(0, (window.screen?.height || 0) - window.innerHeight);
-  return Math.max(SAFARI_NUDGE_MIN_PX, Math.min(Math.max(chromeGap, screenGap, SAFARI_NUDGE_MIN_PX), 180));
-}
+let safariChromeWasOpen = null;
+let safariMeasureRaf = 0;
 
-function scrollSafariChromeAway() {
-  const nudge = document.getElementById("safariNudge");
+function updateSafariChromeHack() {
   const root = document.documentElement;
+  const nudge = document.getElementById("safariNudge");
+  const hint = document.getElementById("safariChromeHint");
   if (!safariLandscapeNudgeNeeded()) {
-    root.classList.remove("safari-scroll-hack");
-    document.body.style.height = "";
-    document.body.style.minHeight = "";
-    if (nudge) nudge.style.height = "";
+    root.classList.remove("safari-scroll-hack", "safari-chrome-open", "safari-chrome-locked");
+    if (hint) hint.hidden = true;
+    clearSafariInlineLayout();
     if (window.scrollY) window.scrollTo(0, 0);
-    pinAppToVisibleScreen();
+    safariChromeWasOpen = null;
     return;
   }
-  const distance = safariNudgeDistance();
+
+  const open = safariChromeIsOpen();
   root.classList.add("safari-scroll-hack");
-  // Make the document taller than the visible viewport so Safari can scroll chrome away.
-  const tall = Math.max(window.innerHeight, window.visualViewport?.height || 0) + distance + 24;
-  document.body.style.height = `${tall}px`;
-  document.body.style.minHeight = `${tall}px`;
-  if (nudge) nudge.style.height = `${distance}px`;
-  // Classic mobile Safari chrome collapse: create overflow, then scroll it away.
-  const applyScroll = () => {
-    window.scrollTo(0, 1);
-    window.scrollTo(0, distance);
-    document.documentElement.scrollTop = distance;
-    document.body.scrollTop = distance;
+  root.classList.toggle("safari-chrome-open", open);
+  root.classList.toggle("safari-chrome-locked", !open);
+
+  if (open) {
+    // Tall document so the user can swipe the page itself (required to collapse Safari chrome).
+    const vvH = window.visualViewport?.height || window.innerHeight;
+    const pad = Math.max(vvH * 1.35, 900);
+    if (nudge) nudge.style.height = `${pad}px`;
+    document.body.style.minHeight = `${vvH + pad}px`;
+    document.body.style.height = "";
+    if (hint) hint.hidden = false;
+    // Sticky/fixed game stays on screen; document scroll happens via the spacer below.
     pinAppToVisibleScreen();
-  };
-  applyScroll();
-  requestAnimationFrame(applyScroll);
-}
-
-const safariNudgeTimers = [];
-function scheduleSafariLandscapeNudge() {
-  scrollSafariChromeAway();
-  while (safariNudgeTimers.length) window.clearTimeout(safariNudgeTimers.pop());
-  // iOS updates layout after orientationchange; keep pushing chrome away.
-  for (const ms of [50, 150, 300, 600, 1000, 1600]) {
-    safariNudgeTimers.push(window.setTimeout(scrollSafariChromeAway, ms));
+  } else {
+    if (nudge) nudge.style.height = "0px";
+    document.body.style.height = "";
+    document.body.style.minHeight = "";
+    if (hint) hint.hidden = true;
+    if (window.scrollY) window.scrollTo(0, 0);
+    pinAppToVisibleScreen();
   }
+
+  if (safariChromeWasOpen === true && open === false) {
+    // Just collapsed — keep locked to the expanded viewport.
+    pinAppToVisibleScreen();
+  }
+  safariChromeWasOpen = open;
 }
 
-window.addEventListener("resize", scheduleSafariLandscapeNudge);
-window.addEventListener("orientationchange", scheduleSafariLandscapeNudge);
-window.addEventListener("pageshow", scheduleSafariLandscapeNudge);
+function scheduleSafariLandscapeNudge() {
+  if (safariMeasureRaf) cancelAnimationFrame(safariMeasureRaf);
+  safariMeasureRaf = requestAnimationFrame(() => {
+    safariMeasureRaf = 0;
+    updateSafariChromeHack();
+  });
+}
+
+window.addEventListener("resize", scheduleSafariLandscapeNudge, { passive: true });
+window.addEventListener("orientationchange", scheduleSafariLandscapeNudge, { passive: true });
+window.addEventListener("pageshow", scheduleSafariLandscapeNudge, { passive: true });
+window.addEventListener("scroll", scheduleSafariLandscapeNudge, { passive: true });
 document.addEventListener("fullscreenchange", scheduleSafariLandscapeNudge);
 document.addEventListener("webkitfullscreenchange", scheduleSafariLandscapeNudge);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) scheduleSafariLandscapeNudge();
 });
 if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", () => {
+  window.visualViewport.addEventListener("resize", scheduleSafariLandscapeNudge, { passive: true });
+  window.visualViewport.addEventListener("scroll", () => {
     pinAppToVisibleScreen();
     scheduleSafariLandscapeNudge();
-  });
-  window.visualViewport.addEventListener("scroll", pinAppToVisibleScreen);
+  }, { passive: true });
 }
 if (window.screen?.orientation?.addEventListener) {
   window.screen.orientation.addEventListener("change", scheduleSafariLandscapeNudge);
@@ -2440,7 +2479,7 @@ function enterImmersivePlay() {
     try {
       el.webkitRequestFullscreen();
     } catch {
-      /* Fullscreen is optional; the landscape scroll nudge still hides browser chrome. */
+      /* iOS Safari has no real fullscreen; document-scroll chrome hide is the fallback. */
     }
   }
 }
@@ -2460,6 +2499,8 @@ document.addEventListener(
   { passive: true }
 );
 scheduleSafariLandscapeNudge();
+setTimeout(scheduleSafariLandscapeNudge, 250);
+setTimeout(scheduleSafariLandscapeNudge, 800);
 const touchState = {
   enabled: isTouchDevice,
   left: false,
@@ -5789,11 +5830,13 @@ function installMobileZoomGuards() {
   document.addEventListener(
     "touchmove",
     (e) => {
+      // While Safari chrome is visible we must allow document scroll — that is the
+      // only way iOS collapses the tab/URL bars. Block page scroll only after lock.
+      if (document.documentElement.classList.contains("safari-chrome-open")) return;
       const target = e.target instanceof Element ? e.target : null;
       if (!target) return;
       const inGameSurface = !!target.closest("#gameCanvas, .touch-overlay, .game-wrap");
       if (!inGameSurface) return;
-      // Prevent Safari viewport scroll / pull-to-refresh while controlling the game.
       e.preventDefault();
     },
     { passive: false, capture: true }
