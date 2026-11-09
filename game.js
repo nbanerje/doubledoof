@@ -1531,7 +1531,9 @@ function swipeAxisDelta(dx, dy) {
 }
 
 /**
- * Horizontal snap carousel. Browse by swipe or arrows; confirm with Choose.
+ * Horizontal snap carousel with UIScrollView / Core Animation-style paging:
+ * finger tracks 1:1 while dragging; on release a flick (velocity) advances a page,
+ * otherwise it settles by distance threshold, with an ease-out settle animation.
  * @param {{
  *   options: { id: string, enabled?: boolean }[],
  *   selectedId?: string,
@@ -1612,15 +1614,23 @@ function buildSwipePicker(cfg) {
   actions.className = "swipe-picker-actions";
   actions.appendChild(choose);
 
+  // UIKit-ish paging thresholds (px/ms ≈ UIScrollView flick).
+  const FLICK_VELOCITY = 0.45; // px per ms
+  const DISTANCE_RATIO = 0.28; // settle to neighbor if dragged this far
+  const SETTLE_MIN_MS = 220;
+  const SETTLE_MAX_MS = 420;
+
   const slideWidth = () => Math.max(1, scroller.clientWidth || slides[0]?.offsetWidth || 1);
 
-  const currentIndex = () => {
-    if (!options.length) return 0;
-    return Math.min(options.length - 1, Math.max(0, Math.round(scroller.scrollLeft / slideWidth())));
-  };
+  let pageIndex = startIndex;
+  let animFrame = 0;
+
+  const clampIndex = (i) => Math.min(options.length - 1, Math.max(0, i));
+
+  const currentIndex = () => pageIndex;
 
   const paint = () => {
-    const index = currentIndex();
+    const index = pageIndex;
     const opt = options[index];
     count.textContent = options.length ? `${index + 1} / ${options.length}` : "";
     [...dots.children].forEach((dot, i) => dot.classList.toggle("is-active", i === index));
@@ -1639,27 +1649,101 @@ function buildSwipePicker(cfg) {
     return index;
   };
 
-  const goTo = (index, smooth = true) => {
-    if (!options.length) return;
-    const i = Math.min(options.length - 1, Math.max(0, index));
-    const left = i * slideWidth();
-    if (smooth && typeof scroller.scrollTo === "function") {
-      scroller.scrollTo({ left, behavior: "smooth" });
-    } else {
-      scroller.scrollLeft = left;
+  const stopAnim = () => {
+    if (animFrame) {
+      cancelAnimationFrame(animFrame);
+      animFrame = 0;
     }
-    paint();
   };
 
-  // Native overflow-x often fails under the phone CSS rotate + Safari chrome hack.
-  // Drive the carousel with pointer drag mapped into scroll space.
+  const easeOutCubic = (t) => 1 - (1 - t) ** 3;
+
+  const animateTo = (index, velocityPxPerMs = 0) => {
+    if (!options.length) return;
+    const i = clampIndex(index);
+    pageIndex = i;
+    const width = slideWidth();
+    const from = scroller.scrollLeft;
+    const to = i * width;
+    const distance = Math.abs(to - from);
+    if (distance < 0.5) {
+      scroller.scrollLeft = to;
+      paint();
+      return;
+    }
+    // Duration shortens with higher flick speed (Core Animation feel).
+    const speed = Math.max(Math.abs(velocityPxPerMs), 0.25);
+    const duration = Math.min(SETTLE_MAX_MS, Math.max(SETTLE_MIN_MS, distance / speed));
+    stopAnim();
+    scroller.classList.add("is-settling");
+    const started = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - started) / duration);
+      const k = easeOutCubic(t);
+      scroller.scrollLeft = from + (to - from) * k;
+      if (t < 1) {
+        animFrame = requestAnimationFrame(step);
+      } else {
+        animFrame = 0;
+        scroller.scrollLeft = to;
+        scroller.classList.remove("is-settling");
+        paint();
+      }
+    };
+    paint();
+    animFrame = requestAnimationFrame(step);
+  };
+
+  const goTo = (index, smooth = true) => {
+    if (smooth) animateTo(index, 0.55);
+    else {
+      stopAnim();
+      pageIndex = clampIndex(index);
+      scroller.scrollLeft = pageIndex * slideWidth();
+      paint();
+    }
+  };
+
+  /** Pick target page from release velocity + drag distance (UIScrollView paging). */
+  const targetIndexFromGesture = (startPage, axisDelta, velocity, inverted) => {
+    const width = slideWidth();
+    // Map finger delta into scrollLeft space (CSS-rotated phones invert axes).
+    const scrollDelta = inverted ? axisDelta : -axisDelta;
+
+    // Fast flick: advance one page in the flick direction, even from a short drag.
+    if (Math.abs(velocity) >= FLICK_VELOCITY) {
+      const flickDir = inverted ? Math.sign(velocity) : -Math.sign(velocity);
+      if (flickDir < 0) return clampIndex(startPage - 1);
+      if (flickDir > 0) return clampIndex(startPage + 1);
+    }
+
+    // Slow drag: commit if past distance threshold, else spring back.
+    const progress = scrollDelta / width;
+    if (progress <= -DISTANCE_RATIO) return clampIndex(startPage - 1);
+    if (progress >= DISTANCE_RATIO) return clampIndex(startPage + 1);
+    return startPage;
+  };
+
+  // Native overflow-x often fails under the phone CSS rotate; drive with pointer + velocity.
   let drag = null;
   const endDrag = (ev) => {
     if (!drag || (ev && drag.pointerId != null && ev.pointerId !== drag.pointerId)) return;
-    const moved = Math.abs(drag.axisTotal) > 10;
-    const width = slideWidth();
-    const projected = drag.startScroll + (drag.inverted ? 1 : -1) * drag.axisTotal;
-    const index = Math.min(options.length - 1, Math.max(0, Math.round(projected / width)));
+    const now = performance.now();
+    // Velocity from recent samples (last ~80ms), Core Animation style.
+    let velocity = 0;
+    const samples = drag.samples;
+    if (samples.length >= 2) {
+      const latest = samples[samples.length - 1];
+      let earliest = samples[0];
+      for (let s = samples.length - 2; s >= 0; s -= 1) {
+        if (latest.t - samples[s].t <= 80) earliest = samples[s];
+        else break;
+      }
+      const dt = Math.max(1, latest.t - earliest.t);
+      velocity = (latest.axis - earliest.axis) / dt;
+    }
+    const target = targetIndexFromGesture(drag.startPage, drag.axisTotal, velocity, drag.inverted);
+    const moved = Math.abs(drag.axisTotal) > 8 || Math.abs(velocity) >= FLICK_VELOCITY;
     try {
       scroller.releasePointerCapture?.(drag.pointerId);
     } catch (_) {
@@ -1667,8 +1751,7 @@ function buildSwipePicker(cfg) {
     }
     drag = null;
     scroller.classList.remove("is-dragging");
-    // Instant snap after a flick — smooth scroll fights touch momentum on iOS.
-    goTo(index, false);
+    animateTo(target, velocity);
     if (moved && ev) {
       ev.preventDefault?.();
       ev.stopPropagation?.();
@@ -1680,15 +1763,20 @@ function buildSwipePicker(cfg) {
     (ev) => {
       if (ev.button != null && ev.button !== 0) return;
       if (ev.target instanceof Element && ev.target.closest("button,a,input")) return;
+      stopAnim();
+      pageIndex = clampIndex(Math.round(scroller.scrollLeft / slideWidth()));
       drag = {
         pointerId: ev.pointerId,
         lastX: ev.clientX,
         lastY: ev.clientY,
         startScroll: scroller.scrollLeft,
+        startPage: pageIndex,
         axisTotal: 0,
         inverted: isCssRotatedPhoneLayout(),
+        samples: [{ t: performance.now(), axis: 0 }],
       };
       scroller.classList.add("is-dragging");
+      scroller.classList.remove("is-settling");
       try {
         scroller.setPointerCapture(ev.pointerId);
       } catch (_) {
@@ -1708,8 +1796,20 @@ function buildSwipePicker(cfg) {
       drag.lastY = ev.clientY;
       const axis = swipeAxisDelta(dx, dy);
       drag.axisTotal += axis;
-      scroller.scrollLeft = drag.startScroll + (drag.inverted ? 1 : -1) * drag.axisTotal;
-      if (Math.abs(drag.axisTotal) > 6) ev.preventDefault();
+      const now = performance.now();
+      drag.samples.push({ t: now, axis: drag.axisTotal });
+      while (drag.samples.length > 12 || (drag.samples[0] && now - drag.samples[0].t > 100)) {
+        drag.samples.shift();
+      }
+      // Rubber-band slightly past ends while dragging (UIScrollView feel).
+      const width = slideWidth();
+      let next = drag.startScroll + (drag.inverted ? 1 : -1) * drag.axisTotal;
+      const min = 0;
+      const max = Math.max(0, (options.length - 1) * width);
+      if (next < min) next = min + (next - min) * 0.35;
+      if (next > max) next = max + (next - max) * 0.35;
+      scroller.scrollLeft = next;
+      if (Math.abs(drag.axisTotal) > 4) ev.preventDefault();
     },
     { passive: false }
   );
@@ -1721,18 +1821,21 @@ function buildSwipePicker(cfg) {
   prevBtn.addEventListener("click", (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    goTo(currentIndex() - 1);
+    goTo(currentIndex() - 1, true);
   });
   nextBtn.addEventListener("click", (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    goTo(currentIndex() + 1);
+    goTo(currentIndex() + 1, true);
   });
 
   scroller.addEventListener(
     "scroll",
     () => {
-      if (!drag) paint();
+      if (!drag && !animFrame) {
+        pageIndex = clampIndex(Math.round(scroller.scrollLeft / slideWidth()));
+        paint();
+      }
     },
     { passive: true }
   );

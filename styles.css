@@ -495,7 +495,8 @@ button:hover {
   width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  scroll-snap-type: x mandatory;
+  /* Paging is driven in JS (velocity flick + ease-out), not CSS scroll-snap. */
+  scroll-snap-type: none;
   scroll-behavior: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
@@ -508,7 +509,10 @@ button:hover {
 
 .char-carousel.is-dragging {
   cursor: grabbing;
-  scroll-snap-type: none;
+}
+
+.char-carousel.is-settling {
+  pointer-events: none;
 }
 
 .char-carousel::-webkit-scrollbar {
