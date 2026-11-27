@@ -2670,11 +2670,13 @@ function renderOnlineLobby() {
 function openSettings() {
   settingsDrawerEl.classList.add("open");
   settingsBackdropEl.classList.remove("hidden");
+  refreshTouchOverlayVisibility();
 }
 
 function closeSettings() {
   settingsDrawerEl.classList.remove("open");
   settingsBackdropEl.classList.add("hidden");
+  refreshTouchOverlayVisibility();
 }
 
 function setArcadeStep(step) {
@@ -5905,6 +5907,8 @@ function installMobileZoomGuards() {
     (e) => {
       const target = e.target instanceof Element ? e.target : null;
       if (!target || !target.closest("button, .touch-overlay, #gameCanvas")) return;
+      // Never swallow the settings gear — landscape menus depend on it.
+      if (target.closest("#settingsToggleBtn, #settingsCloseBtn, #settingsDrawer")) return;
       const now = Date.now();
       if (now - lastTapAt < 420) {
         e.preventDefault();
@@ -6231,7 +6235,22 @@ function setupUI() {
     }
   });
 
-  document.getElementById("settingsToggleBtn").addEventListener("click", openSettings);
+  const settingsToggleBtn = document.getElementById("settingsToggleBtn");
+  let settingsOpenGuardUntil = 0;
+  const openSettingsFromUi = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const now = Date.now();
+    if (now < settingsOpenGuardUntil) return;
+    settingsOpenGuardUntil = now + 350;
+    openSettings();
+  };
+  // Touch + click: landscape phones often suppress the synthetic click after touchend guards.
+  settingsToggleBtn.addEventListener("pointerup", openSettingsFromUi);
+  settingsToggleBtn.addEventListener("touchend", openSettingsFromUi, { passive: false });
+  settingsToggleBtn.addEventListener("click", openSettingsFromUi);
   document.getElementById("settingsCloseBtn").addEventListener("click", closeSettings);
   settingsBackdropEl.addEventListener("click", closeSettings);
 
