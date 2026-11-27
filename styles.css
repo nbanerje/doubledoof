@@ -40,7 +40,7 @@ body {
   bottom: 14px;
   width: min(360px, calc(100vw - 28px));
   overflow-y: auto;
-  z-index: 20;
+  z-index: 50;
   transform: translateX(calc(100% + 20px));
   transition: transform 180ms ease-out;
 }
@@ -53,7 +53,7 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(4, 8, 16, 0.62);
-  z-index: 19;
+  z-index: 49;
 }
 
 .settings-backdrop.hidden {
@@ -401,7 +401,8 @@ button:hover {
   position: absolute;
   top: 10px;
   right: 10px;
-  z-index: 7;
+  /* Above arcade/buff overlays (12–13) so landscape menus stay tappable. */
+  z-index: 25;
   width: 36px;
   height: 36px;
   display: grid;
@@ -417,6 +418,8 @@ button:hover {
   color: #dce8ff;
   opacity: 0.72;
   transition: opacity 120ms ease, transform 120ms ease, background 120ms ease;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
 .settings-toggle:hover {
@@ -1506,6 +1509,10 @@ button.lobby-decline {
     text-transform: uppercase;
     color: #ff9aa3;
     margin-bottom: 2px;
+  }
+
+  .touch-pad-label--blue {
+    color: #9ec7ff;
   }
 
   .touch-joystick--p1 {
